@@ -18,8 +18,21 @@ const Cloud={
   /* ---------------- AUTH ---------------- */
   async init(){ if(!this.enabled) return;
     try{ this.blocked=JSON.parse(localStorage.getItem('lc_blocked')||'[]'); }catch(e){}
-    if(/access_token=|error_description=/.test(location.hash)) await this.handleHash(location.hash,true);
-    else { try{ this.session=JSON.parse(localStorage.getItem(this.SKEY)); }catch(e){} if(this.session) await this.loadUser(); }
+    let pendingHash='';
+    if(/access_token=|error_description=|error=/.test(location.hash)) pendingHash=location.hash;
+    else if(/access_token=|error_description=|error=/.test(location.search)) pendingHash=location.search;
+    if(!pendingHash && Bridge.android && window.LuaChillNative.consumePendingAuth){
+      try{ pendingHash=window.LuaChillNative.consumePendingAuth()||''; }catch(e){}
+    }
+    if(!pendingHash && Bridge.electron && window.LuaChillDesktop.consumeAuth){
+      try{ pendingHash=(await window.LuaChillDesktop.consumeAuth())||''; }catch(e){}
+    }
+    if(pendingHash){
+      await this.handleHash(pendingHash, pendingHash===location.hash||pendingHash===location.search);
+    } else {
+      try{ this.session=JSON.parse(localStorage.getItem(this.SKEY)); }catch(e){}
+      if(this.session) await this.loadUser();
+    }
     window.addEventListener('online',()=>this.pushSoon()); },
   redirectUrl(){ if(Bridge.android) return this.cfg.androidRedirect||'luachill://auth';
     if(Bridge.electron) return this.cfg.desktopRedirect||'http://127.0.0.1:45821/auth-callback';
@@ -36,12 +49,20 @@ const Cloud={
     if(Bridge.electron && window.LuaChillDesktop.openAuth){ window.LuaChillDesktop.openAuth(url); UI.toast('Đang mở trình duyệt để đăng nhập...'); return; }
     if(Bridge.ext && chrome.identity){ try{ const r=await chrome.identity.launchWebAuthFlow({url,interactive:true}); await this.handleHash(new URL(r).hash); }catch(e){ UI.toast('Đăng nhập chưa hoàn tất — kiểm tra Redirect URL trong Supabase: '+redir); } return; }
     location.href=url; },
-  async handleHash(hash,clean){ const p=new URLSearchParams(String(hash).replace(/^#/,''));
-    if(clean) history.replaceState(null,'',location.pathname+location.search);
-    if(p.get('error_description')){ UI.toast('Đăng nhập lỗi: '+p.get('error_description')); return false; }
+  async handleHash(hash,clean){ const raw=String(hash||'').replace(/^[#?]+/,''); const p=new URLSearchParams(raw);
+    if(clean) history.replaceState(null,'',location.pathname);
+    if(p.get('error_description')||p.get('error')){ UI.toast('Đăng nhập lỗi: '+(p.get('error_description')||p.get('error'))); return false; }
     const at=p.get('access_token'); if(!at) return false;
+    if(this._handlingToken===at || (this.session && this.session.access_token===at && this.user)) return true;
+    this._handlingToken=at;
     this.session={access_token:at,refresh_token:p.get('refresh_token'),expires_at:Date.now()+(+p.get('expires_in')||3600)*1000};
-    localStorage.setItem(this.SKEY,JSON.stringify(this.session)); const ok=await this.loadUser(); if(ok) UI.toast(`Đã đăng nhập: ${U.esc(this.profile.name)}`); return ok; },
+    localStorage.setItem(this.SKEY,JSON.stringify(this.session));
+    let ok=false;
+    try{ ok=await this.loadUser(); }
+    finally{ if(!ok) this._handlingToken=null; }
+    if(ok) UI.toast(`Đã đăng nhập: ${U.esc((this.profile&&this.profile.name)||this.meta().name)}`);
+    else UI.toast('Không tải được tài khoản — hãy kiểm tra kết nối mạng và thử lại.');
+    return ok; },
   async refresh(){ if(!this.session||!this.session.refresh_token) return false;
     try{ const r=await fetch(`${this.base()}/auth/v1/token?grant_type=refresh_token`,{method:'POST',headers:{apikey:this.cfg.supabaseAnonKey,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:this.session.refresh_token})});
       if(!r.ok) throw new Error(r.status); const j=await r.json();
@@ -51,9 +72,24 @@ const Cloud={
   async loadUser(){ try{ const t=await this.token(); if(!t) return false;
       const r=await fetch(`${this.base()}/auth/v1/user`,{headers:{apikey:this.cfg.supabaseAnonKey,Authorization:'Bearer '+t}});
       if(!r.ok){ if(r.status===401){ this.signOut(true); } return false; }
-      this.user=await r.json(); await this.ensureProfile(); await this.syncSave(); this.startSync(); await this.loadBlocks(); this.loadFriends(); this.emit('auth',this.user); return true;
+      this.user=await r.json();
+      try{ await this.ensureProfile(); }catch(e){
+        console.warn('[Cloud] profile fallback',e);
+        const m=this.meta();
+        this.profile=this.profile||{id:this.uid,name:m.name,avatar_url:m.avatar,friend_code:'------'};
+      }
+      if(typeof Core!=='undefined' && Core.s && Core.s.name==='Bạn Lừa' && this.profile && this.profile.name && this.profile.name!=='Bạn Lừa'){
+        Core.s.name=this.profile.name; Core.save();
+      }
+      await this.syncSave().catch(()=>{});
+      this.startSync();
+      await this.loadBlocks().catch(()=>{});
+      await this.loadFriends().catch(()=>{});
+      this.emit('auth',this.user);
+      if(typeof Core!=='undefined' && Core.s) Core.emit('change');
+      return true;
     }catch(e){ console.warn('[Cloud] offline',e); return false; } },
-  signOut(silent){ this.session=null; this.user=null; this.profile=null; this.friendIds=[]; this.incomingIds=[]; this.outgoingIds=[]; localStorage.removeItem(this.SKEY); RT.close(); this.emit('friends'); this.emit('auth',null); if(!silent) UI.toast('Đã đăng xuất'); },
+  signOut(silent){ this._handlingToken=null; this.session=null; this.user=null; this.profile=null; this.friendIds=[]; this.incomingIds=[]; this.outgoingIds=[]; localStorage.removeItem(this.SKEY); RT.close(); this.emit('friends'); this.emit('auth',null); if(!silent) UI.toast('Đã đăng xuất'); },
   meta(){ const m=(this.user&&this.user.user_metadata)||{}; return {name:(m.full_name||m.name||m.custom_claims&&m.custom_claims.global_name||m.user_name||'Bạn Lừa').slice(0,24),avatar:m.avatar_url||m.picture||null,provider:(this.user&&this.user.app_metadata&&this.user.app_metadata.provider)||''}; },
 
   /* ---------------- REST (PostgREST) ---------------- */
@@ -70,9 +106,9 @@ const Cloud={
   /* ---------------- PROFILE + SAVE ---------------- */
   async ensureProfile(){ const rows=await this.api(`profiles?id=eq.${this.uid}&select=*`); const m=this.meta();
     if(rows&&rows[0]){ this.profile=rows[0]; if(!this.profile.avatar_url&&m.avatar) this.api(`profiles?id=eq.${this.uid}`,{method:'PATCH',body:{avatar_url:m.avatar}}).catch(()=>{}); return; }
-    const ins=await this.api('profiles',{method:'POST',body:{id:this.uid,name:m.name,avatar_url:m.avatar},prefer:'return=representation'}); this.profile=ins[0]; },
-  statsRow(){ const s=Core.s; return {name:s.name.slice(0,24),gems:Math.max(0,Math.floor(s.gems)),quests_total:s.questsTotal,screen_today:s.screen.used,screen_day:s.day,sleep_streak:s.sleep.streak,checkin_streak:s.checkin.streak,
-    acc:s.acc.on,room:{wall:s.decor.wall,floor:s.decor.floor,placed:s.decor.placed},garden_stage:Core.gardenStage(),updated_at:new Date().toISOString()}; },
+    const ins=await this.api('profiles',{method:'POST',body:{id:this.uid,name:m.name,avatar_url:m.avatar},prefer:'resolution=merge-duplicates,return=representation'}); this.profile=(ins&&ins[0])||{id:this.uid,name:m.name,avatar_url:m.avatar,friend_code:'------'}; },
+  statsRow(){ const s=Core.s; return {name:s.name.slice(0,24),gems:Math.max(0,Math.floor(s.gems)),quests_total:s.questsTotal,screen_today:Math.max(s.screen.totalUsed||0,s.screen.used||0),screen_day:s.day,sleep_streak:s.sleep.streak,checkin_streak:s.checkin.streak,
+    acc:s.acc.on,room:{wall:s.decor.wall,floor:s.decor.floor,placed:s.decor.placed,roomId:s.decor.activeRoom||'bedroom',house:s.decor.house||'mushroom'},garden_stage:Core.gardenStage(),updated_at:new Date().toISOString()}; },
   async push(){ if(!this.online||!Core.s) return; clearTimeout(this._pt); this._pt=null;
     try{ await this.api(`profiles?id=eq.${this.uid}`,{method:'PATCH',body:this.statsRow()});
       await this.api('saves',{method:'POST',body:{id:this.uid,state:Core.s,updated_at:new Date().toISOString()},prefer:'resolution=merge-duplicates'}); this.lastPush=Date.now();
@@ -86,7 +122,7 @@ const Cloud={
       if(remote && (!Core.s || (remote.savedAt||0)>(Core.s.savedAt||0)+5000)){ Store.save(remote); Core.reload(); UI.toast('Đã tải tiến trình từ đám mây ☁️'); }
       else if(Core.s) this.pushSoon();
     }catch(e){ console.warn('[Cloud] save sync',e.message); } },
-  async rename(name){ name=String(name).trim().slice(0,24); if(!name) return; Core.s.name=name; Core.save(); await this.api(`profiles?id=eq.${this.uid}`,{method:'PATCH',body:{name}}); this.profile.name=name; },
+  async rename(name){ name=String(name).trim().slice(0,24); if(!name) return; Core.s.name=name; Core.save(); await this.api(`profiles?id=eq.${this.uid}`,{method:'PATCH',body:{name}}); if(this.profile) this.profile.name=name; Core.emit('change'); this.emit('auth',this.user); },
 
   /* ---------------- FRIENDS, PENDING REQUESTS & BLOCKS ---------------- */
   isBlocked(id){ return this.blocked.includes(id); },

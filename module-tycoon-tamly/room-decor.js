@@ -106,9 +106,9 @@ const Decor={
         <div id="dPanel" style="margin-top:6px;height:126px;overflow-x:auto;overflow-y:hidden;touch-action:pan-x"></div>
       </div>`;
     this.svg=el.querySelector('#dSvg'); this.tab='shop'; this.cat='all'; this.mode='view'; this.sel=null; this.ghost=null;
-    el.querySelector('[data-a=back]').onclick=()=>this.close(); el.querySelector('[data-a=set]').onclick=()=>openSettings(); el.querySelector('#dInc').onclick=()=>Shop.collect();
+    el.querySelector('[data-a=back]').onclick=()=>this.close(); el.querySelector('[data-a=set]').onclick=()=>openSettings(); el.querySelector('#dInc').onclick=()=>{ this.hidePop(); Shop.collect(); };
     setInterval(()=>{ if(this.isOpen) Shop.renderIncome(); },15000);
-    el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ this.tab=b.dataset.t; this.renderPanel(); });
+    el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ this.hidePop(); this.sel=null; this.tab=b.dataset.t; this.render(); this.renderPanel(); });
     this.svg.addEventListener('pointerdown',e=>this.onDown(e)); this.svg.addEventListener('pointermove',e=>this.onMove(e));
     this.svg.addEventListener('contextmenu',e=>e.preventDefault());
     Core.on('decor',()=>{ if(this.isOpen){ this.render(); this.renderPanel(); } }); Core.on('gems',()=>{ if(this.isOpen) this.renderTop(); });
@@ -124,7 +124,7 @@ const Decor={
     }).join('');
     wrap.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
       const id=b.dataset.rm, cfg=DATA.ROOMS[id];
-      if(D.rooms[id]){ this.mode='view'; this.sel=null; this.ghost=null; this.hidePop(); this.banner(''); Core.switchRoom(id); return; }
+      if(D.rooms[id]){ this.mode='view'; this.sel=null; this.ghost=null; this.cat=id; this.hidePop(); this.banner(''); Core.switchRoom(id); return; }
       const m=UI.modal(`<div class="center">${sv(IP.home,52)}<h2 class="txt-accent" style="margin-top:4px">Mở rộng: ${cfg.name}</h2>
         <p class="muted" style="margin:6px 0">${cfg.desc}</p>
         <p style="font-weight:800;margin-bottom:12px">Mở phòng mới giúp tăng không gian đặt nội thất & tích thêm thu nhập Gem mỗi giờ!</p>
@@ -132,7 +132,7 @@ const Decor={
       m.box.querySelector('[data-x]').onclick=()=>m.close();
       m.box.querySelector('[data-ok]').onclick=()=>{
         const r=Core.unlockRoom(id);
-        if(r.ok){ burstFx(UI.app,UI.app.clientWidth/2,UI.app.clientHeight/2,16,'sparkle',120); UI.toast(`Chúc mừng! Đã mở rộng ${cfg.name}!`); m.close(); }
+        if(r.ok){ this.cat=id; burstFx(UI.app,UI.app.clientWidth/2,UI.app.clientHeight/2,16,'sparkle',120); UI.toast(`Chúc mừng! Đã mở rộng ${cfg.name}!`); m.close(); }
         else UI.toast(r.msg);
       };
     });
@@ -160,8 +160,9 @@ const Decor={
     document.getElementById('dRot').onclick=()=>{ this.ghost.rot=this.ghost.rot?0:1; this.render(); };
     document.getElementById('dCancel').onclick=()=>{ this.mode='view'; this.ghost=null; this.banner(''); this.render(); };
     this.render(); },
-  showPop(e){ this.hidePop(); const p=Core.curRoom().placed.find(x=>x.uid===this.sel); if(!p) return; const [x,y]=UI.rel(e.clientX,e.clientY);
-    const pop=this.pop=document.createElement('div'); pop.className='item-pop card'; pop.style.left=x+'px'; pop.style.top=(y-14)+'px';
+  showPop(e){ this.hidePop(); const p=Core.curRoom().placed.find(x=>x.uid===this.sel); if(!p) return; const [rx,ry]=UI.rel(e.clientX,e.clientY);
+    const x=U.clamp(rx,110,Math.max(110,UI.app.clientWidth-110)), y=U.clamp(ry-14,100,Math.max(100,UI.app.clientHeight-220));
+    const pop=this.pop=document.createElement('div'); pop.className='item-pop card'; pop.style.left=x+'px'; pop.style.top=y+'px';
     pop.innerHTML=`<b style="align-self:center;font-size:12px">${DATA.DECOR[p.id].name}</b><button class="btn sm" data-p="rot">${sv(IP.rotate,16)}</button><button class="btn sm" data-p="move">${sv(IP.move,16)}</button><button class="btn sm rose" data-p="store">${sv(IP.box,16)}</button>`;
     UI.app.appendChild(pop);
     pop.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ const a=b.dataset.p;

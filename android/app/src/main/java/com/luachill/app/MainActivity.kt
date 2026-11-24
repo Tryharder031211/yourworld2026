@@ -42,6 +42,9 @@ class MainActivity : AppCompatActivity() {
     private var fileCb: ValueCallback<Array<Uri>>? = null
     private var geoCb: GeolocationPermissions.Callback? = null
     private var geoOrigin: String? = null
+    private var pageLoaded: Boolean = false
+    @Volatile
+    private var pendingAuthHash: String? = null
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val uris = WebChromeClient.FileChooserParams.parseResult(res.resultCode, res.data)
@@ -89,6 +92,12 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 return assetLoader.shouldInterceptRequest(request.url)
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                pageLoaded = true
+                deliverPendingAuth()
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -143,11 +152,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Cập nhật ngay trạng thái 3 quyền hệ thống khi người dùng quay lại từ Cài đặt Android
+        // Cập nhật trạng thái quyền hệ thống và chuyển token OAuth (nếu có) khi quay lại app
         if (::webView.isInitialized) {
+            deliverPendingAuth()
             webView.post {
                 webView.evaluateJavascript("window.__onAppResume && window.__onAppResume();", null)
             }
+        }
+    }
+
+    private fun deliverPendingAuth() {
+        val hash = pendingAuthHash ?: return
+        if (!pageLoaded || !::webView.isInitialized) return
+        val quoted = JSONObject.quote(hash)
+        webView.post {
+            webView.evaluateJavascript("window.__onAuthCallback && window.__onAuthCallback($quoted);", null)
         }
     }
 
@@ -159,13 +178,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIntent(intent: Intent?, initial: Boolean) {
         val data = intent?.data
-        if (data != null && data.scheme == "luachill" && data.host == "auth") {
-            val hash = data.encodedFragment ?: data.encodedQuery ?: ""
-            val quoted = JSONObject.quote("#$hash")
-            webView.post {
-                webView.evaluateJavascript("window.__onAuthCallback && window.__onAuthCallback($quoted);", null)
+        if (data != null && data.scheme.equals("luachill", ignoreCase = true) && data.host.equals("auth", ignoreCase = true)) {
+            val raw = data.encodedFragment?.takeIf { it.isNotBlank() }
+                ?: data.encodedQuery?.takeIf { it.isNotBlank() }
+                ?: ""
+            if (raw.isNotEmpty()) {
+                pendingAuthHash = "#$raw"
+                deliverPendingAuth()
             }
-            if (initial) webView.loadUrl(BASE_URL + "index.html#$hash")
+            if (initial) webView.loadUrl(BASE_URL + "index.html")
             return
         }
 
@@ -262,6 +283,13 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openAuth(url: String) {
             runOnUiThread { openExternal(url) }
+        }
+
+        @JavascriptInterface
+        fun consumePendingAuth(): String {
+            val h = pendingAuthHash
+            pendingAuthHash = null
+            return h ?: ""
         }
 
         @JavascriptInterface

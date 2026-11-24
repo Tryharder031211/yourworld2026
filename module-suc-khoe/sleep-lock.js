@@ -52,10 +52,10 @@ const SleepLock={
         <div class="card" style="padding:12px;margin-top:10px"><b>Giấc ngủ 7 đêm qua</b>
           <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${(s.sleep.hist.slice(-7).length?s.sleep.hist.slice(-7):[]).map(h=>`<div class="night-dot" style="background:${h.q==='good'?C.mg:C.rb}" title="${h.day}">${sv(IP[h.q==='good'?'moon':'bolt'],14)}</div>`).join('')||'<span class="muted">Chưa có dữ liệu — tối nay bắt đầu nhé!</span>'}</div></div>
 
-        <div class="card tint-teal" style="padding:12px;margin-top:10px"><b>Whitelist trong giờ ngủ</b>
-          <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:10px">
-            <div class="row" data-wl="zalo" style="cursor:pointer">${appIcon('zalo')}<b style="font-size:13px">Zalo Công việc</b></div>
-            <div class="row" data-wl="call" style="cursor:pointer">${appIcon('call')}<b style="font-size:13px">Cuộc gọi khẩn cấp</b></div>
+        <div class="card tint-teal" style="padding:12px;margin-top:10px"><b>Luôn được phép trong giờ ngủ</b>
+          <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:8px">
+            <button class="btn sm moss" data-wl="call">${sv(IP.call,16)} Cuộc gọi khẩn cấp (113 / 114 / 115)</button>
+            ${emergencySummaryTags()}
           </div></div>`;
       el.querySelectorAll('[data-b]').forEach(b=>b.onclick=()=>{ bed=b.dataset.b; draw(); });
       el.querySelectorAll('[data-wl]').forEach(b=>b.onclick=()=>Overlays.whitelist(b.dataset.wl));
@@ -65,6 +65,23 @@ const SleepLock={
       if(ci) ci.onclick=()=>{ const r=Core.checkIn(); if(r.ok){ Core.s.pendingMorning=null; Core.save(); burstFx(UI.app,UI.app.clientWidth/2,UI.app.clientHeight/2,16,'gem',140); UI.toast(`Điểm danh thành công! +${r.gem} Gem • Chuỗi ${r.streak} ngày`); } draw(); }; };
     draw(); const off=Core.on('change',()=>{ if(!el.querySelector('.time-pick button:focus')) draw(); }); return off; }
 };
+
+function emergencyListNames(){
+  const b=Core.s.block;
+  if(b.mode!=='lockdown') return [];
+  if(Bridge.electron) return (b.emergencyPc||[]).slice(0,3).map(x=>x.name||x.pkg||x);
+  if(Bridge.android) return (b.emergency||[]).slice(0,3).map(x=>x.name||x.pkg||x);
+  return (b.emergencyWeb||[]).slice(0,3);
+}
+function emergencySummaryTags(){
+  const list=emergencyListNames();
+  if(list.length) return list.map(n=>`<span class="tag">${U.esc(n)}</span>`).join('');
+  return `<span class="muted" style="font-size:12px">Chế độ hiện tại: ${Core.blockModeLabel()}</span>`;
+}
+function emergencyBadgesHTML(){
+  const em=emergencyListNames().map(n=>`<div class="os-app wl"><div class="app-ic" style="background:${C.mg}">${sv(IP.shield,26)}</div><span>${U.esc(String(n).slice(0,12))}</span></div>`).join('');
+  return `${em}<div class="os-app wl" data-wl="call" style="cursor:pointer">${appIcon('call')}<span>Gọi khẩn cấp</span></div>`;
+}
 
 function lockedBadgesHTML(){
   const b=Core.s.block, mode=b.mode||'apps';
@@ -95,7 +112,7 @@ const Overlays={
         <div class="center" style="margin-top:12px"><div style="display:inline-grid;place-items:center;width:82px;height:82px;border-radius:50%;background:#F7F4D5;border:3px solid ${C.rb};box-shadow:0 0 24px #D3968C88">${sv(IP.lock,50)}</div>
           <h2 style="font-size:24px;margin-top:8px">${info.site?U.esc(info.site)+' đã bị khóa!':mode==='lockdown'?'Hết giới hạn hằng ngày!':'Đã chạm giới hạn sử dụng!'}</h2>
           <p style="opacity:.9;font-weight:600">${subMsg}</p></div>
-        <div class="os-grid" style="margin:14px 0">${lockedBadgesHTML()}${['zalo','call'].map(k=>`<div class="os-app wl" data-wl="${k}">${appIcon(k)}<span>${APPS[k].n}</span></div>`).join('')}</div>
+        <div class="os-grid" style="margin:14px 0">${lockedBadgesHTML()}${emergencyBadgesHTML()}</div>
         <div class="card" style="padding:12px;margin-bottom:10px">
           <div class="row" style="margin-bottom:6px">${sv(IP.clock,20)}<b class="grow" style="font-size:14.5px">Tùy chỉnh thời gian sử dụng & Chế độ khóa</b></div>
           <p class="muted">Đang bật: <b>${Core.blockModeLabel(mode)}</b>. Bạn có thể chuyển sang chế độ khác hoặc điều chỉnh giới hạn riêng của từng chế độ.</p>
@@ -111,9 +128,10 @@ const Overlays={
     o.querySelector('[data-a=close]').onclick=()=>{ o.classList.remove('on'); if(document.body.dataset.page!=='index') Nav.go('home'); };
     o.querySelectorAll('[data-wl]').forEach(e=>e.onclick=()=>this.whitelist(e.dataset.wl)); },
 
-  whitelist(k){ if(k==='zalo'){ UI.modal(`<div class="row">${appIcon('zalo')}<h2 class="grow">Zalo Công việc</h2></div><div class="chat-box" style="min-height:110px"><div class="msg">Sếp: Mai họp 9h nhé, nhớ mang báo cáo.</div><div class="msg me">Dạ em nhận ạ!</div></div><p class="muted">Whitelist: không bao giờ bị chặn trong giờ khóa${Bridge.android?' (com.zing.zalo)':Bridge.ext?' (chat.zalo.me)':''}.</p>`); return; }
-    const m=UI.modal(`<div class="center"><div style="display:inline-block">${appIcon('call')}</div><h2>Cuộc gọi khẩn cấp</h2><p class="muted">Luôn được phép, kể cả khi đang khóa.</p><div class="grid3" style="margin-top:10px">${['113 Công an','114 Cứu hỏa','115 Cấp cứu'].map(t=>`<button class="btn moss" data-call="${t.split(' ')[0]}">${t}</button>`).join('')}</div></div>`);
-    m.box.querySelectorAll('[data-call]').forEach(b=>b.onclick=()=>{ if(Bridge.android) location.href='tel:'+b.dataset.call; else UI.toast(`Số khẩn cấp: ${b.dataset.call}`); }); },
+  whitelist(){
+    const m=UI.modal(`<div class="center"><div style="display:inline-block">${appIcon('call')}</div><h2>Cuộc gọi khẩn cấp</h2><p class="muted">Luôn được phép ngay cả khi đang trong giờ khóa.</p><div class="grid3" style="margin-top:10px">${['113 Công an','114 Cứu hỏa','115 Cấp cứu'].map(t=>`<button class="btn moss" data-call="${t.split(' ')[0]}">${t}</button>`).join('')}</div><button class="btn full" style="margin-top:10px" data-x>Đóng</button></div>`);
+    m.box.querySelector('[data-x]').onclick=()=>m.close();
+    m.box.querySelectorAll('[data-call]').forEach(b=>b.onclick=()=>{ if(Bridge.android) location.href='tel:'+b.dataset.call; else UI.toast(`Số điện thoại khẩn cấp: ${b.dataset.call}`); }); },
 
   bed(on){ const o=document.getElementById('ovBed'); if(!on){ o.classList.remove('on'); return; } const s=Core.s, slept=s.night.slept;
     o.innerHTML=`<div class="os-bar"><span>${U.hm(Core.now())}</span><span class="row" style="gap:6px">${sv(IP.moon,14)} Chế độ Ngủ<button class="icon-btn" data-a="usage" style="width:30px;height:30px;border-radius:9px" title="Tùy chỉnh thời gian sử dụng">${sv(IP.clock,18)}</button><button class="icon-btn" data-a="set" style="width:30px;height:30px;border-radius:9px" title="Cài đặt">${sv(IP.gear,18)}</button></span></div>
@@ -123,8 +141,8 @@ const Overlays={
         <h2 style="font-size:21px;margin-top:4px">${slept?'Chúc ngủ ngon, '+U.esc(s.name)+'!':'Đến giờ ngủ rồi, '+U.esc(s.name)+' ơi!'}</h2>
         <p style="opacity:.88;font-weight:600">${slept?`Ngủ đủ 8 tiếng! Từ ${s.sleep.wake} đến ${SleepLock.winClose(s.sleep.wake)} nhớ vào <b>Điểm danh</b> nhận Gem nhé!`:`Giờ ngủ đã chọn: <b>${s.sleep.bed}</b>. Khóa theo chế độ <b>${Core.blockModeLabel()}</b> đến <b>${s.sleep.wake}</b>.`}</p>
         <div id="bedDk" style="position:relative;height:112px;width:200px;margin:0 auto"></div>
-        <div style="font-size:11px;font-weight:800;opacity:.8;letter-spacing:.5px">WHITELIST</div>
-        <div class="row" style="justify-content:center;gap:24px;margin:6px 0 12px">${['zalo','call'].map(k=>`<div class="os-app wl" data-wl="${k}" style="cursor:pointer">${appIcon(k)}<span>${APPS[k].n}</span></div>`).join('')}</div>
+        <div style="font-size:11px;font-weight:800;opacity:.8;letter-spacing:.5px">LUÔN ĐƯỢC PHÉP</div>
+        <div class="row" style="justify-content:center;gap:18px;margin:6px 0 12px;flex-wrap:wrap">${emergencyBadgesHTML()}</div>
         <div class="col" style="gap:10px;margin-top:6px">
           <button class="btn full" data-a="usage" style="background:rgba(247,244,213,.16);color:#F7F4D5;border-color:#F7F4D5">${sv(IP.clock,18)} Bảng tùy chỉnh thời gian & Đồng hồ</button>
           ${slept?`<p class="muted" style="color:#b9d3d6">Chế độ ngủ đang bật. Chạm nút trên nếu cần xem bảng thời gian hoặc cài đặt.</p>`
@@ -134,7 +152,7 @@ const Overlays={
       </div>`;
     o.classList.add('on');
     o.querySelector('[data-a=set]').onclick=()=>openSettings();
-    o.querySelectorAll('[data-a=usage]').forEach(b=>b.onclick=()=>openUsageSettings('limit'));
+    o.querySelectorAll('[data-a=usage]').forEach(b=>b.onclick=()=>openUsageSettings('mode'));
     const dk=new Donkey({scale:1.25,tilt:-16,yaw:20,mood:slept?'sleep':'tired',acc:Core.s.acc.on}); dk.pos(100,102); o.querySelector('#bedDk').appendChild(dk.el);
     o.querySelectorAll('[data-wl]').forEach(e=>e.onclick=()=>this.whitelist(e.dataset.wl));
     const sl=o.querySelector('[data-a=sleep]'); if(sl) sl.onclick=()=>{ Core.goSleep(); this.bed(true); };

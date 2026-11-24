@@ -79,8 +79,8 @@ const DATA = {
     {id:'feed',    name:'Cho thú cưng ăn đúng giờ',  icon:'bowl',  gem:15},
     {id:'plant',   name:'Tưới cây đúng giờ',         icon:'can',   gem:15}
   ],
-  GARDEN_WIN:[{id:'am',label:'Sáng',from:6,to:9},{id:'pm',label:'Chiều',from:16,to:18}],
-  MEAL_WIN:[{id:'b',label:'Bữa sáng',from:7,to:9},{id:'l',label:'Bữa trưa',from:11,to:13},{id:'d',label:'Bữa tối',from:18,to:20}],
+  GARDEN_WIN:[{id:'am',label:'Sáng',from:6,to:10},{id:'pm',label:'Chiều',from:16,to:19}],
+  MEAL_WIN:[{id:'b',label:'Bữa sáng',from:6,to:10},{id:'l',label:'Bữa trưa',from:11,to:14},{id:'d',label:'Bữa tối',from:18,to:21}],
   GARDEN_STAGES:[{xp:0,name:'Hạt giống'},{xp:25,name:'Mầm non'},{xp:75,name:'Cây con'},{xp:150,name:'Nụ hoa'},{xp:250,name:'Nở rộ'}],
   PET_LV:[{xp:0,name:'Bé con',scale:.72},{xp:40,name:'Nhóc tì',scale:.86},{xp:100,name:'Trưởng thành',scale:1},{xp:200,name:'Siêu cưng',scale:1.16}],
   PETS:{ dog:{name:'Cún Mochi',price:0}, cat:{name:'Mèo Mướp',price:120}, rabbit:{name:'Thỏ Bông',price:180}, capy:{name:'Capybara Bơ',price:250} },
@@ -181,8 +181,7 @@ const DATA = {
     {id:'f4',name:'Thỏ Bông',animal:'rabbit',color:'#efe6c4',gems:1420,screen:95,quests:33,sleep:'good',streak:5,wall:'#b9d3d6',floor:'#efe6c4',room:[['bed',0,2],['lamp',0,1],['beanbag',3,1],['plant',5,5]],bio:'Thích trồng cây và nuôi pet.'},
     {id:'f5',name:'Vịt Vàng',animal:'duck',color:'#f1d77a',gems:720,screen:188,quests:12,sleep:'bad',streak:0,wall:'#e8dcc0',floor:'#d9b0a8',room:[['guitar',0,0],['tank',1,0],['beanbag',2,2]],bio:'Hay thức khuya xem livestream...'},
     {id:'f6',name:'Cú Đêm',animal:'owl',color:'#8a7a9a',gems:1105,screen:131,quests:19,sleep:'bad',streak:1,wall:'#F7F4D5',floor:'#7fa3ab',room:[['desk',0,0],['lamp',1,0],['shelf',0,1],['bed',4,2]],bio:'Đang tập ngủ trước 23h.'}
-  ],
-  REPLIES:[]
+  ]
 };
 
 const Store = {
@@ -192,20 +191,18 @@ const Store = {
   clear(){ localStorage.removeItem(this.KEY); }
 };
 
-/* ---------- Native Bridge: Android • Electron Desktop • Chrome Extension • Tauri • Web ---------- */
+/* ---------- Native Bridge: Android • Electron Desktop • Chrome Extension • Web ---------- */
 const Bridge = {
   get android(){ return typeof window!=='undefined' && !!window.LuaChillNative; },
   get electron(){ return typeof window!=='undefined' && !!window.LuaChillDesktop; },
   get ext(){ try{ return typeof chrome!=='undefined' && !!(chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local); }catch(e){ return false; } },
-  get tauri(){ return !!(window.__TAURI__ && window.__TAURI__.core); },
-  get canBlock(){ return this.android||this.ext||this.electron||this.tauri; },
+  get canBlock(){ return this.android||this.ext||this.electron; },
   get realUsage(){ return this.android||this.ext||this.electron; },
   get nativeApps(){ return this.android||this.electron; },
   mode(){
     if(this.android) return 'Android Native Kotlin (đo & chặn app thật + Draw-Over-Apps)';
     if(this.electron) return 'Desktop PC Electron (đo, chặn 3 chế độ & chạy nền khay hệ thống)';
     if(this.ext) return 'Chrome Extension (đo & chặn web thật)';
-    if(this.tauri) return 'Tauri Native';
     return 'Web / PWA (đo phiên trong app)';
   },
   getInstalledApps(){
@@ -217,7 +214,6 @@ const Bridge = {
     if(this.android){ try{ window.LuaChillNative.setPolicy(JSON.stringify(p)); }catch(e){ console.warn(e); } }
     else if(this.electron){ try{ window.LuaChillDesktop.setPolicy(p); }catch(e){ console.warn(e); } }
     else if(this.ext){ chrome.storage.local.set({policy:p}); try{ const r=chrome.runtime.sendMessage({type:'evaluate'}); if(r&&r.catch) r.catch(()=>{}); }catch(e){} }
-    else if(this.tauri){ window.__TAURI__.core.invoke('set_policy',{policy:p}).catch(e=>console.warn(e)); }
   },
   getUsage(){
     if(this.android){ try{ return Promise.resolve(JSON.parse(window.LuaChillNative.getUsage())); }catch(e){ return Promise.resolve(null); } }
@@ -265,7 +261,8 @@ class GameCore {
     s.checkin=s.checkin||{last:null,streak:0,hist:[]}; s.garden.xp=s.garden.xp??30; s.pets.xp=s.pets.xp||{};
     s.created=s.created||{day:s.day,hour:8};
     s.decor.lastCollect=s.decor.lastCollect||Date.now(); s.monster=s.monster||{best:0,plays:0};
-    s.screen.floor=s.screen.floor||0; s.screen.sites=s.screen.sites||{}; s.screen.allSites=s.screen.allSites||{};
+    s.offset=0;
+    s.screen.floor=0; s.screen.sites=s.screen.sites||{}; s.screen.allSites=s.screen.allSites||{}; s.screen.perPkg=s.screen.perPkg||{};
     s.screen.totalUsed=s.screen.totalUsed??s.screen.used??0; s.screen.webSec=s.screen.webSec||0;
     s.clock={...defaultClock(),...(s.clock||{})};
     const db=defaultBlock();
@@ -302,14 +299,13 @@ class GameCore {
     this.state={ v:1, name:name||'Bạn Lừa', created:{day,hour:now.getHours()+now.getMinutes()/60},
       acc:{owned:acc?[acc]:[],on:acc?[acc]:[]}, gems:150, energy:82, happy:72, offset:0, day,
       clock,
-      screen:{limit:120,used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{}},
+      screen:{limit:120,used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{},perPkg:{}},
       night:{key:null,slept:false,broken:false},
       sleep:{last:null,lastDay:null,streak:0,buffDay:null,bed:'23:00',wake:'07:00',hist:[]},
       checkin:{last:null,streak:0,hist:[]},
       quests:{day,done:{}}, questsTotal:0,
       garden:{health:72,xp:30,watered:{},missed:{}},
       pets:{owned:['dog'],fed:{},happy:70,xp:{dog:0}},
-      force:{until:0,id:null},
       decor:{wall:'#F7F4D5',floor:'#c99a6b',lastCollect:Date.now(),activeRoom:'bedroom',house:'mushroom',housesOwned:['mushroom'],
         rooms:{bedroom:{wall:'#F7F4D5',floor:'#c99a6b',placed:[{uid:'b1',id:'bed',gx:0,gy:1,rot:0},{uid:'p1',id:'plant',gx:5,gy:0,rot:0},{uid:'r1',id:'rug',gx:2,gy:2,rot:0}]}},
         placed:[{uid:'b1',id:'bed',gx:0,gy:1,rot:0},{uid:'p1',id:'plant',gx:5,gy:0,rot:0},{uid:'r1',id:'rug',gx:2,gy:2,rot:0}],
@@ -323,9 +319,9 @@ class GameCore {
   /* ---------------- ĐỒNG HỒ: Auto Location / Timezone / Manual ---------------- */
   effectiveOffsetMs(){
     const s=this.s; if(!s) return 0;
-    const demo=s.offset||0, c=s.clock||defaultClock();
-    if(c.mode==='manual') return demo+(c.manualOffset||0);
-    return demo+ClockUtil.tzShiftMs(c.tz||ClockUtil.deviceTz(), new Date(Date.now()+demo));
+    const c=s.clock||defaultClock();
+    if(c.mode==='manual') return c.manualOffset||0;
+    return ClockUtil.tzShiftMs(c.tz||ClockUtil.deviceTz(), new Date());
   }
   now(){ return new Date(Date.now()+this.effectiveOffsetMs()); }
   hour(){ const n=this.now(); return n.getHours()+n.getMinutes()/60+n.getSeconds()/3600; }
@@ -334,24 +330,34 @@ class GameCore {
     if(c.mode==='manual') return 'Giờ thủ công';
     return `${c.tz} (${ClockUtil.utcLabel(c.tz)})`;
   }
+  canEditClock(){
+    if(this.s && this.isBedtime() && !this.s.night.broken) return {ok:false,msg:'Đang trong giờ ngủ — không thể đổi giờ để tránh lách luật khóa ngủ 😉'};
+    return {ok:true};
+  }
   setClockTimezone(tz, region){
+    const chk=this.canEditClock(); if(!chk.ok) return chk;
     const s=this.s; s.clock={...s.clock,mode:'tz',tz,region:region||tz,manualOffset:0,lastScan:Date.now()};
     this.save(); this.syncPolicy(); this.tick(); this.emit('change');
+    return {ok:true};
   }
   setClockAuto(tz, region, coords){
+    const chk=this.canEditClock(); if(!chk.ok) return chk;
     const s=this.s; s.clock={...s.clock,mode:'auto',tz:tz||ClockUtil.deviceTz(),region:region||'Tự động theo thiết bị',manualOffset:0,lat:coords?coords.lat:null,lon:coords?coords.lon:null,lastScan:Date.now()};
     this.save(); this.syncPolicy(); this.tick(); this.emit('change');
+    return {ok:true};
   }
   setClockManual(hm, ymdStr){
-    const s=this.s; const [h,m]=String(hm).split(':').map(Number); if(isNaN(h)||isNaN(m)) return false;
-    const base=new Date(Date.now()+(s.offset||0));
+    const chk=this.canEditClock(); if(!chk.ok) return chk;
+    const s=this.s; const [h,m]=String(hm).split(':').map(Number); if(isNaN(h)||isNaN(m)) return {ok:false,msg:'Giờ không hợp lệ'};
+    const base=new Date();
     let target;
     if(ymdStr && /^\d{4}-\d{2}-\d{2}$/.test(ymdStr)){ const [Y,M,D]=ymdStr.split('-').map(Number); target=new Date(Y,M-1,D,h,m,base.getSeconds()); }
     else target=new Date(base.getFullYear(),base.getMonth(),base.getDate(),h,m,base.getSeconds());
     s.clock={...s.clock,mode:'manual',manualOffset:target.getTime()-base.getTime(),region:`Tự chỉnh (${U.pad(h)}:${U.pad(m)})`,lastScan:Date.now()};
-    this.save(); this.syncPolicy(); this.tick(); this.emit('change'); return true;
+    this.save(); this.syncPolicy(); this.tick(); this.emit('change'); return {ok:true};
   }
   async scanLocationTime(){
+    const chk=this.canEditClock(); if(!chk.ok) return {ok:false,source:'locked',tz:this.s.clock.tz,region:chk.msg};
     /* 1. Ưu tiên GPS/Vị trí trình duyệt (nếu người dùng cho phép) */
     const gps=await new Promise(res=>{
       if(typeof navigator==='undefined'||!navigator.geolocation){ res(null); return; }
@@ -404,8 +410,15 @@ class GameCore {
   }
   setBlockMode(mode){ if(!['lockdown','apps','groups'].includes(mode)) return;
     this.s.block.mode=mode;
-    /* Chuyển sang chế độ từng app hoặc nhóm app sẽ gỡ cờ khóa tổng hằng ngày của chế độ Khóa toàn bộ */
-    if(mode!=='lockdown' && this.s.screen.locked){ this.s.screen.locked=false; this.emit('screenLock',false); }
+    if(mode==='lockdown'){
+      this.s.screen.used=Math.max(this.s.screen.totalUsed||0,this.s.screen.used||0);
+      const locked=this.screenRemaining()<=0;
+      this.s.screen.locked=locked;
+      this.emit('screenLock',locked);
+    } else if(this.s.screen.locked){
+      this.s.screen.locked=false;
+      if(!this.hasAnyLimitLock()) this.emit('screenLock',false);
+    }
     this.save(); this.syncPolicy(); this.emit('change'); }
   blockModeLabel(mode=(this.s&&this.s.block&&this.s.block.mode)||'apps'){
     return mode==='lockdown'?'Khóa toàn bộ hằng ngày (chừa 3 khẩn cấp)'
@@ -429,13 +442,32 @@ class GameCore {
     const raw=Number((this.s&&this.s.block&&this.s.block.appLimits&&this.s.block.appLimits[key])||0);
     return raw>0?raw:DATA.DEFAULT_APP_LIMIT;
   }
+  appLimitByDisplay(displayKey){
+    const s=this.s, b=s&&s.block; if(!b||b.mode!=='apps') return 0;
+    const dl=String(displayKey||'').toLowerCase(), extra=s.screen.extra||0;
+    if(Bridge.nativeApps){
+      const arr=Bridge.electron?(b.pc||[]):(b.android||[]);
+      const hit=arr.find(a=>String(a.pkg||a).toLowerCase()===dl || String(a.name||'').toLowerCase()===dl);
+      return hit?(this.appLimitOf(hit.pkg||hit)+extra):0;
+    }
+    for(const a of DATA.WEB_APPS){
+      if(!(b.web||[]).includes(a.id)) continue;
+      if(a.domains.some(d=>dl===d||dl.endsWith('.'+d))) return this.appLimitOf(a.domains[0])+extra;
+    }
+    const cust=(b.custom||[]).find(d=>dl===d||dl.endsWith('.'+d));
+    return cust?(this.appLimitOf(cust)+extra):0;
+  }
   appUsedOf(key, label=''){
-    const all=(this.s&&this.s.screen&&(this.s.screen.allSites||this.s.screen.sites))||{};
+    const sc=this.s&&this.s.screen; if(!sc) return 0;
     const kl=String(key||'').toLowerCase(), ll=String(label||'').toLowerCase();
+    const perPkg=sc.perPkg||{};
+    if(kl && perPkg[key]!==undefined) return perPkg[key];
+    for(const [pk,v] of Object.entries(perPkg)) if(pk.toLowerCase()===kl) return v;
+    const all=sc.allSites||sc.sites||{};
     let sum=0;
     for(const [k,v] of Object.entries(all)){
       const s=k.toLowerCase();
-      if(s===kl || (ll&&s===ll) || s.endsWith('.'+kl)) sum+=v;
+      if(s===kl || (ll&&s===ll) || (kl&&s.endsWith('.'+kl))) sum+=v;
     }
     return sum;
   }
@@ -481,9 +513,13 @@ class GameCore {
   }
   /* Tính phút đã dùng của 1 nhóm từ dữ liệu đo thật */
   groupUsed(g){
-    const all=this.s.screen.allSites||this.s.screen.sites||{};
+    const sc=this.s.screen, perPkg=sc.perPkg||{}, all=sc.allSites||sc.sites||{};
     if(Bridge.android||Bridge.electron){
       const arr=Bridge.electron?(g.pc||[]):(g.android||[]);
+      if(Object.keys(perPkg).length){
+        const lowMap=Object.fromEntries(Object.entries(perPkg).map(([k,v])=>[k.toLowerCase(),v]));
+        return arr.reduce((sum,a)=>sum+(lowMap[String(a.pkg||a).toLowerCase()]||0),0);
+      }
       const names=new Set(arr.map(a=>String(a.name||a.pkg||a).toLowerCase()));
       const pkgs=new Set(arr.map(a=>String(a.pkg||a).toLowerCase()));
       let sum=0; for(const [k,v] of Object.entries(all)){ const kl=k.toLowerCase(); if(names.has(kl)||pkgs.has(kl)) sum+=v; }
@@ -492,6 +528,47 @@ class GameCore {
     const doms=this.domainsOfWebIds(g.web,g.custom);
     let sum=0; for(const [d,v] of Object.entries(all)) if(doms.some(x=>d===x||d.endsWith('.'+x))) sum+=v;
     return sum;
+  }
+  hasAnyLimitLock(){
+    const s=this.s; if(!s) return false;
+    const mode=s.block.mode||'apps', extra=s.screen.extra||0;
+    if(mode==='lockdown') return !!(s.screen.locked || this.screenRemaining()<=0);
+    if(mode==='groups') return (s.block.groups||[]).some(g=>this.groupUsed(g)>=g.limit+extra);
+    return this.activeAppEntries().some(a=>a.locked);
+  }
+  isBlockedTargetLocked(target){
+    const s=this.s; if(!s) return false;
+    const mode=s.block.mode||'apps', extra=s.screen.extra||0;
+    if(mode==='lockdown') return !!(s.screen.locked || this.screenRemaining()<=0);
+    const tl=String(target||'').toLowerCase();
+    if(mode==='groups'){
+      if(!tl) return this.hasAnyLimitLock();
+      const g=(s.block.groups||[]).find(x=>tl.includes(x.name.toLowerCase()) || this.domainsOfWebIds(x.web,x.custom).some(d=>tl===d||tl.endsWith('.'+d)) || (Bridge.electron?x.pc:x.android||[]).some(a=>String(a.name||a.pkg||a).toLowerCase()===tl));
+      return g?(this.groupUsed(g)>=g.limit+extra):this.hasAnyLimitLock();
+    }
+    if(!tl) return this.hasAnyLimitLock();
+    const a=this.activeAppEntries().find(x=>x.name.toLowerCase()===tl || x.key.toLowerCase()===tl || tl.endsWith('.'+x.key.toLowerCase()));
+    return a?a.locked:this.hasAnyLimitLock();
+  }
+  async syncUsageNow(){
+    const s=this.s; if(!s||!Bridge.realUsage) return null;
+    try{
+      const u=await Bridge.getUsage();
+      if(!u||u.day!==s.day) return null;
+      const tot=u.totalMinutes??u.minutes??0;
+      const rel=s.block.mode==='lockdown'?tot:(u.minutes??tot);
+      const perPkg=u.perPkgMinutes||{};
+      const sites=u.sites||u.apps||{};
+      const allSites=u.allSites||u.allApps||sites;
+      const changed=rel!==s.screen.used || tot!==s.screen.totalUsed || JSON.stringify(allSites)!==JSON.stringify(s.screen.allSites||{}) || JSON.stringify(perPkg)!==JSON.stringify(s.screen.perPkg||{});
+      s.screen.used=rel; s.screen.totalUsed=tot; s.screen.sites=sites; s.screen.allSites=allSites; s.screen.perPkg=perPkg;
+      if(s.block.mode==='lockdown'){
+        const shouldLock=this.screenRemaining()<=0;
+        if(shouldLock && !s.screen.locked){ s.screen.locked=true; this.syncPolicy(); this.emit('screenLock',true); }
+      }
+      if(changed) this.emit('change');
+      return u;
+    }catch(e){ return null; }
   }
 
   /* ---------------- NHẮC HẸN THÔNG MINH ---------------- */
@@ -573,7 +650,7 @@ class GameCore {
       }
     }
     return {
-      limit:s.screen.limit, extra:s.screen.extra, usedFloor:mode==='lockdown'?(s.screen.floor||0):0, screenLocked:mode==='lockdown'&&!!s.screen.locked,
+      limit:s.screen.limit, extra:s.screen.extra, usedFloor:0, screenLocked:mode==='lockdown'&&!!s.screen.locked,
       bed:s.sleep.bed, wake:s.sleep.wake, brokenNight:s.night.broken?s.night.key:null, slept:!!s.night.slept,
       day:s.day, offset:this.effectiveOffsetMs(), tz:(s.clock&&s.clock.tz)||ClockUtil.deviceTz(),
       blockMode:mode,
@@ -605,46 +682,57 @@ class GameCore {
 
     /* Đo thời gian sử dụng THẬT theo từng nền tảng */
     if(Bridge.realUsage){
-      if(this._n%3===0) Bridge.getUsage().then(u=>{
-        if(!u||u.day!==s.day) return;
-        const tot=u.totalMinutes??u.minutes??0;
-        const rel=s.block.mode==='lockdown'?tot:(u.minutes??tot);
-        const v=Math.max(rel, s.screen.floor||0);
-        const changed=v!==s.screen.used || tot!==s.screen.totalUsed || JSON.stringify(u.allSites||u.allApps||{})!==JSON.stringify(s.screen.allSites||{});
-        s.screen.used=v; s.screen.totalUsed=tot;
-        s.screen.sites=u.sites||u.apps||{};
-        s.screen.allSites=u.allSites||u.allApps||s.screen.sites;
-        if(changed) this.emit('change');
-      });
+      if(this._n%3===0) this.syncUsageNow();
     } else if(!(bed&&s.night.slept) && this.visible){
-      /* Trên Web/PWA: đo đúng thời gian thực (giây thật 60s = 1 phút) thay vì giả lập nhanh */
+      /* Trên Web/PWA: đo đúng thời gian thực (60 giây = 1 phút) */
       const nowMs=Date.now(), dtSec=Math.min(5,Math.max(0,(nowMs-this._lastRealMs)/1000));
       this._lastRealMs=nowMs;
       s.screen.webSec=(s.screen.webSec||0)+dtSec;
       const realMins=Math.floor(s.screen.webSec/60);
-      const v=Math.max(realMins, s.screen.floor||0);
-      if(v!==s.screen.used){ s.screen.used=v; s.screen.totalUsed=v; s.screen.allSites={'Lừa Chill (Web)':v}; this.emit('change'); }
+      if(realMins!==s.screen.used){ s.screen.used=realMins; s.screen.totalUsed=realMins; s.screen.allSites={'Lừa Chill (Web)':realMins}; this.emit('change'); }
     } else { this._lastRealMs=Date.now(); }
 
     if(s.block.mode==='lockdown' && this.screenRemaining()<=0 && !s.screen.locked){ s.screen.locked=true; this.syncPolicy(); this.emit('screenLock',true); }
-    s.energy=U.clamp(s.energy-1/80); s.happy=U.clamp(s.happy-1/110); s.pets.happy=U.clamp(s.pets.happy-1/90);
+    /* Nhịp giảm chỉ số hợp lý theo thời gian thực (~4%/giờ khi thức; hồi năng lượng khi ngủ) */
+    if(bed && s.night.slept){
+      s.energy=U.clamp(s.energy+1/240);
+    } else {
+      s.energy=U.clamp(s.energy-1/900);
+      s.happy=U.clamp(s.happy-1/1440);
+      s.pets.happy=U.clamp(s.pets.happy-1/1200);
+    }
     this.checkMissed();
     if(this._n%5===0) this.checkReminders();
     if(++this._n%5===0) this.save();
     this.emit('tick'); }
 
-  newDay(force){ const s=this.s; const prev=s.day;
-    const q=force || ((s.night.key===prev && s.night.broken)?'bad':'good');
-    s.day=this.dk(this.now());
+  _pruneDayMap(map, keepFromDay){
+    if(!map) return;
+    for(const k of Object.keys(map)){ const dk=k.split('|')[0]; if(dk && dk<keepFromDay) delete map[k]; }
+  }
+  newDay(){ const s=this.s; const prev=s.day, nextDay=this.dk(this.now());
+    const consecutive=(nextDay===U.addDays(prev,1));
+    s.day=nextDay;
     s.quests={day:s.day,done:{}};
-    Object.assign(s.screen,{used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{}});
+    Object.assign(s.screen,{used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{},perPkg:{}});
+    const wasBroken=(s.night.key===prev && s.night.broken);
     s.night={key:null,slept:false,broken:false}; this.bedLockOn=false;
-    if(q==='good'){ s.sleep.streak++; s.energy=100; s.happy=U.clamp(s.happy+12); s.sleep.buffDay=s.day; s.garden.health=U.clamp(s.garden.health+25); }
-    else { s.sleep.streak=0; s.energy=40; s.happy=U.clamp(s.happy-10); s.sleep.buffDay=null; s.garden.health=U.clamp(s.garden.health-5); }
-    s.sleep.last=q; s.sleep.lastDay=s.day; s.sleep.hist=[...s.sleep.hist,{day:prev,q}].slice(-14);
-    s.pendingMorning={q,streak:s.sleep.streak,day:s.day};
+    const cutoff=U.addDays(s.day,-14);
+    this._pruneDayMap(s.garden.watered,cutoff); this._pruneDayMap(s.garden.missed,cutoff); this._pruneDayMap(s.pets.fed,cutoff);
+    if(consecutive){
+      const q=wasBroken?'bad':'good';
+      if(q==='good'){ s.sleep.streak++; s.energy=100; s.happy=U.clamp(s.happy+12); s.sleep.buffDay=s.day; s.garden.health=U.clamp(s.garden.health+25); }
+      else { s.sleep.streak=0; s.energy=40; s.happy=U.clamp(s.happy-10); s.sleep.buffDay=null; s.garden.health=U.clamp(s.garden.health-5); }
+      s.sleep.last=q; s.sleep.lastDay=s.day; s.sleep.hist=[...s.sleep.hist,{day:prev,q}].slice(-14);
+      s.pendingMorning={q,streak:s.sleep.streak,day:s.day};
+    } else {
+      /* Quay lại sau nhiều ngày vắng mặt: bắt đầu ngày mới gọn gàng, không tăng streak giả */
+      s.sleep.streak=0; s.sleep.buffDay=null; s.energy=Math.max(s.energy,85); s.pendingMorning=null;
+    }
     this.save(); this.syncPolicy();
-    this.emit('bedLock',false); this.emit('screenLock',false); this.emit('morning',s.pendingMorning); this.emit('change'); }
+    this.emit('bedLock',false); this.emit('screenLock',false);
+    if(s.pendingMorning) this.emit('morning',s.pendingMorning);
+    this.emit('change'); }
 
   hoursSinceWake(){ return ((this.hour()-this.wakeH())+24)%24; }
   checkInOpen(){ return !this.isBedtime() && this.hoursSinceWake()<DATA.CHECKIN_WINDOW; }
@@ -662,7 +750,7 @@ class GameCore {
   spend(n){ if(this.s.gems<n) return false; this.s.gems-=n; this.emit('gems',{n:-n}); this.save(); return true; }
   boost(e,h){ this.s.energy=U.clamp(this.s.energy+e); this.s.happy=U.clamp(this.s.happy+h); }
 
-  screenRemaining(){ const sc=this.s.screen; return sc.limit+sc.extra-sc.used; }
+  screenRemaining(){ const sc=this.s.screen; return sc.limit+sc.extra-Math.max(sc.totalUsed||0,sc.used||0); }
   setLimit(m){ const sc=this.s.screen; sc.limit=m; if(sc.locked && this.screenRemaining()>0){ sc.locked=false; this.emit('screenLock',false); } this.save(); this.syncPolicy(); this.emit('change'); }
 
   goSleep(){ this.s.night.slept=true; this.save(); this.syncPolicy(); this.emit('sleepState'); this.emit('change'); }
@@ -675,24 +763,34 @@ class GameCore {
     d[id]={photo:photo||null,auto:!!auto,t:Date.now()};
     const g=this.questGem(id); s.questsTotal++; this.boost(6,6); this.addGems(g,'Quest');
     let bonus=false;
-    if(s.screen.locked){ s.screen.extra+=5; s.screen.locked=false; s.gems+=10; bonus=true; this.emit('screenLock',false); }
+    if(this.hasAnyLimitLock()){
+      s.screen.extra=(s.screen.extra||0)+5;
+      if(s.screen.locked && this.screenRemaining()>0) s.screen.locked=false;
+      this.addGems(10,'Thưởng mở khóa bằng Quest');
+      bonus=true;
+      if(!this.hasAnyLimitLock()) this.emit('screenLock',false);
+    }
     this.save(); this.syncPolicy(); this.emit('quest',{id,g,bonus}); this.emit('change');
     return {ok:true,g,bonus}; }
 
-  activeWin(list){ const s=this.s; if(Date.now()<s.force.until) return {id:s.force.id,label:'Demo',from:0,to:24,demo:true};
-    const h=this.hour(); return list.find(w=>h>=w.from&&h<w.to)||null; }
-  winState(list,doneMap){ const h=this.hour(), s=this.s;
+  activeWin(list){ const h=this.hour(); return list.find(w=>h>=w.from&&h<w.to)||null; }
+  _endSinceWake(toH){ const w=this.wakeH(); return ((toH-w)+24)%24 || 24; }
+  winState(list,doneMap){ const h=this.hour(), s=this.s, since=this.hoursSinceWake();
     return list.map(w=>{ const k=s.day+'|'+w.id; let st='later';
-      if(doneMap[k]) st='done'; else if(h>=w.from&&h<w.to) st='now'; else if(h>=w.to && h>=this.wakeH()) st='miss';
+      if(doneMap[k]) st='done';
+      else if(h>=w.from&&h<w.to) st='now';
+      else if(since>=this._endSinceWake(w.to)) st='miss';
       return {...w,st}; }); }
-  checkMissed(){ const s=this.s, h=this.hour(); if(h<this.wakeH()) return;
+  checkMissed(){ const s=this.s, h=this.hour(), since=this.hoursSinceWake();
+    const createdSince=((s.created.hour-this.wakeH())+24)%24;
     for(const w of DATA.GARDEN_WIN){ const k=s.day+'|'+w.id;
-      if(h>=w.to && !s.garden.watered[k] && !s.garden.missed[k]){
-        if(s.day===s.created.day && w.to<=s.created.hour){ s.garden.missed[k]=2; continue; }
+      const endSince=this._endSinceWake(w.to);
+      if(!(h>=w.from&&h<w.to) && since>=endSince && !s.garden.watered[k] && !s.garden.missed[k]){
+        if(s.day===s.created.day && endSince<=createdSince){ s.garden.missed[k]=2; continue; }
         s.garden.missed[k]=1; s.garden.health=U.clamp(s.garden.health-15); this.emit('wilt'); this.emit('change'); } } }
 
   careMult(){ return 1+Math.min(DATA.CARE.streakMax,this.s.care.streak)*DATA.CARE.streakPct/100; }
-  isGolden(w){ return w.demo || (this.hour()-w.from)*60<=DATA.CARE.golden; }
+  isGolden(w){ return (this.hour()-w.from)*60<=DATA.CARE.golden; }
   careStatus(){ const s=this.s, d=s.day; const wDone=DATA.GARDEN_WIN.filter(w=>s.garden.watered[d+'|'+w.id]).length, fDone=DATA.MEAL_WIN.filter(w=>s.pets.fed[d+'|'+w.id]).length;
     return {wDone,wTot:DATA.GARDEN_WIN.length,fDone,fTot:DATA.MEAL_WIN.length,streak:s.care.streak,mult:this.careMult(),comboDone:s.care.last===d}; }
   careReward(base,w){ const parts=[['Cơ bản',base]]; let g=base; const m=this.careMult();
@@ -777,39 +875,6 @@ class GameCore {
   finishShopping(sum){ const s=this.s; s.shop.history.push({month:s.shop.month,profile:sum.profile,spent:sum.spent,fomo:sum.fomoCount,gem:sum.gem}); s.shop.month++;
     this.boost(0,sum.reserveOk?8:-4); this.addGems(sum.gem,'Shopping Tỉnh Thức'); this.emit('change'); }
   finishMonster(score,gem){ const m=this.s.monster; m.plays++; m.best=Math.max(m.best,score); this.boost(0,gem>20?6:0); this.addGems(gem,'Quái vật FOMO'); this.emit('change'); }
-
-  /* Demo / test helpers */
-  demoScreenOut(){
-    const s=this.s, mode=s.block.mode||'apps';
-    if(mode==='lockdown'){
-      const sc=s.screen; sc.used=sc.limit+sc.extra; sc.totalUsed=sc.used; sc.floor=sc.used; sc.locked=false; this.tick();
-    } else if(mode==='apps'){
-      const list=this.activeAppEntries();
-      const target=list[0]||{key:'tiktok.com',name:'TikTok',limit:30};
-      s.screen.allSites[target.key]=target.limit; s.screen.sites[target.key]=target.limit;
-      this.save(); this.syncPolicy(); this.emit('change');
-      if(typeof Overlays!=='undefined') Overlays.screen(true,{site:target.name,mode:'apps',limit:target.limit});
-    } else {
-      const g=(s.block.groups||[])[0]||{id:'social',name:'Mạng xã hội',limit:45,web:['tiktok'],custom:[]};
-      const doms=this.domainsOfWebIds(g.web,g.custom);
-      const k=Bridge.nativeApps?((Bridge.electron?(g.pc||[]):(g.android||[]))[0]?.name||'App nhóm'):(doms[0]||'tiktok.com');
-      s.screen.allSites[k]=g.limit+(s.screen.extra||0); s.screen.sites[k]=g.limit+(s.screen.extra||0);
-      this.save(); this.syncPolicy(); this.emit('change');
-      if(typeof Overlays!=='undefined') Overlays.screen(true,{site:`Nhóm "${g.name}"`,mode:'groups',limit:g.limit+(s.screen.extra||0)});
-    }
-  }
-  demoBedtime(){ const [y,m,d]=this.s.day.split('-').map(Number), b=this.bedH(); const plus=b<this.wakeH()?1:0;
-    const target=new Date(y,m-1,d+plus,Math.floor(b),Math.round((b%1)*60),0);
-    this.s.offset=(target.getTime()-this.now().getTime())+(this.s.offset||0);
-    this.s.night={key:this.s.day,slept:false,broken:false}; this.bedLockOn=false; this.syncPolicy(); this.tick(); }
-  demoMorning(q){ const s=this.s, [y,m,d]=s.day.split('-').map(Number), w=this.wakeH();
-    s.night={key:s.day,slept:q==='good',broken:q==='bad'};
-    const target=new Date(y,m-1,d+1,Math.floor(w),Math.round((w%1)*60)+2,0);
-    s.offset=(target.getTime()-this.now().getTime())+(s.offset||0);
-    this.newDay(q); }
-  demoWindows(){ this.s.force={until:Date.now()+10*60e3,id:'demo'+Date.now()}; this.save(); this.emit('change'); }
-  demoIncome(){ this.s.decor.lastCollect=Date.now()-8*3600e3; this.save(); this.emit('decor'); }
-  realTime(){ this.s.offset=0; this.s.force.until=0; this.bedLockOn=false; this.save(); this.syncPolicy(); this.tick(); this.emit('change'); }
 }
 
 const Path = {

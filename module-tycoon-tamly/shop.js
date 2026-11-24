@@ -43,8 +43,9 @@ const Shop={
       const r=ct.getBoundingClientRect(), [x,y]=UI.rel(r.left+r.width/2,r.top+20); burstFx(UI.app,x,y,12,'sparkle',95); };
     m.box.querySelector('[data-a=later]').onclick=()=>{ m.close(); Decor.tab='boxes'; Decor.renderPanel(); };
     m.box.querySelector('[data-a=place]').onclick=()=>{ m.close(); Decor.startPlace(box.uid,box.id); }; },
-  renderIncome(){ const el=document.getElementById('dInc'); if(!el) return; const inc=Core.income();
-    el.innerHTML=`${sv(IP.heart,15)} <b>${Core.comfort()}</b> • +${Core.incomeRate()}/h ${inc>0?`<span class="tag rose coin-pop">${sv(IP.gem,11)} Thu ${inc}</span>`:'<span class="tag">tích lũy</span>'}`; },
+  renderIncome(){ const el=document.getElementById('dInc'); if(!el) return; const inc=Core.income(), rate=Core.incomeRate();
+    const elapsedMin=(Date.now()-Core.s.decor.lastCollect)/60e3, minPerGem=60/Math.max(1,rate), leftMin=Math.max(1,Math.ceil(minPerGem-(elapsedMin%minPerGem)));
+    el.innerHTML=`${sv(IP.heart,15)} <b>${Core.comfort()}</b> • +${rate}/h ${inc>0?`<span class="tag rose coin-pop">${sv(IP.gem,11)} Thu ${inc}</span>`:`<span class="tag">~${leftMin}p nữa</span>`}`; },
   collect(){ const g=Core.collect(); const el=document.getElementById('dInc');
     if(g>0){ const r=el.getBoundingClientRect(), [x,y]=UI.rel(r.left+r.width/2,r.top+r.height/2); burstFx(UI.app,x,y,14,'gem',95); UI.toast(`Ngôi nhà ấm cúng sinh lời: +${g} Gem!`); }
     else UI.toast('Nhà đang tích lũy Gem... Mở thêm phòng, mua nhà lớn hoặc đặt nội thất để tăng điểm!'); this.renderIncome(); }

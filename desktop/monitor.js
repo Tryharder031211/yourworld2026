@@ -139,9 +139,11 @@ class DesktopMonitor {
     }
   }
 
-  isExempt(procKey) {
+  isExempt(procKey, pid = 0) {
+    if (pid && pid === process.pid) return true;
     const k = normKey(procKey);
     if (!k) return true;
+    if (k.includes('luachill') || k.includes('lua chill')) return true;
     return SYSTEM_EXEMPT.has(k);
   }
 
@@ -221,7 +223,7 @@ class DesktopMonitor {
 
   recordSample(proc, intervalSec) {
     this._ensureDay();
-    if (!proc || this.isExempt(proc.key)) return;
+    if (!proc || this.isExempt(proc.key, proc.pid)) return;
     this.state.totalSec = (this.state.totalSec || 0) + intervalSec;
     this.state.secMap[proc.key] = (this.state.secMap[proc.key] || 0) + intervalSec;
     if (++this._saveTick % 3 === 0) {
@@ -273,7 +275,7 @@ class DesktopMonitor {
 
   /** Kiểm tra 1 ứng dụng PC theo ĐÚNG cơ chế khóa riêng của 1 chế độ đang bật (không chồng giới hạn hằng ngày lên từng app/nhóm app) */
   checkProcess(proc) {
-    if (!proc || this.isExempt(proc.key)) return { blocked: false };
+    if (!proc || this.isExempt(proc.key, proc.pid)) return { blocked: false };
     const p = this.policy;
     const u = this.getUsageSnapshot();
     const day = this.dayKey();

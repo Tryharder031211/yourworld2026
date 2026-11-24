@@ -49,6 +49,7 @@ let isQuitting = false;
 let notifiedTrayOnce = false;
 let currentLockInfo = null;
 let lastLockTriggerMs = 0;
+let pendingAuthHash = null;
 
 /* ---------------- 1. MÁY CHỦ HTTP CỤC BỘ + CẦU NỐI OAUTH GOOGLE/DISCORD ---------------- */
 const AUTH_CALLBACK_HTML = `<!doctype html>
@@ -86,14 +87,23 @@ function startStaticServer() {
 
       if (urlPath === '/auth-done' && req.method === 'POST') {
         let body = '';
-        req.on('data', chunk => { if (body.length < 16384) body += chunk; });
+        req.on('data', chunk => { if (body.length < 65536) body += chunk; });
         req.on('end', () => {
           res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end('ok');
-          const hash = body.startsWith('#') ? body : (body.startsWith('?') ? '#' + body.slice(1) : '#' + body);
+          const raw = String(body || '').trim();
+          if (!raw) return;
+          const hash = raw.startsWith('#') ? raw : (raw.startsWith('?') ? '#' + raw.slice(1) : '#' + raw);
+          pendingAuthHash = hash;
           showMainWindow();
           if (mainWin && !mainWin.isDestroyed()) {
-            mainWin.webContents.send('lc:authCallback', hash);
+            const deliver = () => {
+              if (mainWin && !mainWin.isDestroyed() && pendingAuthHash) {
+                mainWin.webContents.send('lc:authCallback', pendingAuthHash);
+              }
+            };
+            if (mainWin.webContents.isLoading()) mainWin.webContents.once('did-finish-load', deliver);
+            else deliver();
           }
         });
         return;
@@ -311,6 +321,10 @@ ipcMain.on('lc:setPolicy', (_, p) => {
   if (!monitor) return;
   monitor.setPolicy(p);
   updateTrayMenu();
+  if (lockWin && !lockWin.isDestroyed() && currentLockInfo) {
+    const check = monitor.checkProcess({ key: currentLockInfo.procKey, label: currentLockInfo.appName, pid: currentLockInfo.pid || 0 });
+    if (!check.blocked) dismissLockOverlay();
+  }
 });
 
 ipcMain.handle('lc:getUsage', () => (monitor ? monitor.getUsageSnapshot() : null));
@@ -330,6 +344,12 @@ ipcMain.handle('lc:setAutoLaunch', (_, enabled) => {
 
 ipcMain.on('lc:openAuth', (_, url) => {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+});
+
+ipcMain.handle('lc:consumeAuth', () => {
+  const h = pendingAuthHash;
+  pendingAuthHash = null;
+  return h || '';
 });
 
 ipcMain.on('lc:notify', (_, payload) => {

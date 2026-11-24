@@ -9,7 +9,7 @@ function thumbify(file){ return new Promise(res=>{ const fr=new FileReader(); fr
 const Tasks={
   html(){ const n=Core.questCount(), tot=DATA.QUESTS.length, s=Core.s;
     return `<div class="card" style="padding:10px 12px;margin-bottom:12px"><div class="row" style="margin-bottom:4px"><b class="grow">Tiến độ hôm nay</b><b class="txt-accent">${n}/${tot} Quest</b></div>${UI.bar(n/tot*100)}
-      <div class="muted" style="margin-top:5px">${Core.hasBuff()?`<b>Buff Ngủ Ngon đang bật:</b> +20% Gem từ Quest hôm nay!`:`Tắt máy trước ${s.sleep.bed} để sáng mai nhận buff +20% Gem.`}${s.screen.locked?`<br><b class="txt-danger">Đang khóa màn hình → hoàn thành 1 Quest để nhận +5 phút & +10 Gem.</b>`:''}</div></div>`+
+      <div class="muted" style="margin-top:5px">${Core.hasBuff()?`<b>Buff Ngủ Ngon đang bật:</b> +20% Gem từ Quest hôm nay!`:`Tắt máy trước ${s.sleep.bed} để sáng mai nhận buff +20% Gem.`}${Core.hasAnyLimitLock()?`<br><b class="txt-danger">Đang chạm giới hạn khóa → hoàn thành 1 Quest để nhận +5 phút & +10 Gem.</b>`:''}</div></div>`+
       DATA.QUESTS.map(q=>{ const d=s.quests.done[q.id];
         return `<div class="li card ${d?'q-done':''}"><div class="tick-wrap">${d&&d.photo?`<img class="thumb" src="${d.photo}" alt="">`:`<div class="thumb" style="display:grid;place-items:center;background:var(--surface)">${sv(IP[q.icon],32)}</div>`}${d?`<span class="tk">${sv(IP.check,24)}</span>`:''}</div>
         <div class="grow"><div class="t">${q.name}</div><div class="row" style="gap:4px;margin-top:3px;flex-wrap:wrap"><span class="tag">${sv(IP.gem,13)} +${Core.questGem(q.id)}</span>${d?`<span class="tag moss">${d.photo?'Đã gửi ảnh':'Tự động từ game'}</span>`:''}</div></div>

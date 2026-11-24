@@ -54,12 +54,13 @@ const Timer={
   },
 
   /* ---------------- 1) ĐỒNG HỒ & VỊ TRÍ / MÚI GIỜ ---------------- */
-  clockCard(showPanelBtn=true){
+  clockCard(){
     const c=Core.s.clock, n=Core.now(), hm=U.hm(n), sec=U.pad(n.getSeconds());
     const dateStr=`${U.pad(n.getDate())}/${U.pad(n.getMonth()+1)}/${n.getFullYear()}`;
     const modeTag=c.mode==='manual'?'Thủ công':c.mode==='tz'?'Tự chọn múi giờ':'Tự động';
+    const clkLocked=!Core.canEditClock().ok;
     let sub='';
-    if(this._clockPanel==='tz'){
+    if(this._clockPanel==='tz' && !clkLocked){
       const opts=DATA.TIMEZONES.map(z=>`<option value="${U.esc(z.tz)}" ${z.tz===c.tz?'selected':''}>${U.esc(z.label)} (${ClockUtil.utcLabel(z.tz)})</option>`).join('');
       const hasCur=DATA.TIMEZONES.some(z=>z.tz===c.tz);
       sub=`<div class="sub-box">
@@ -70,7 +71,7 @@ const Timer={
           <button class="btn sm pri" data-a="applyTz">Áp dụng</button>
         </div>
       </div>`;
-    } else if(this._clockPanel==='manual'){
+    } else if(this._clockPanel==='manual' && !clkLocked){
       sub=`<div class="sub-box">
         <label class="muted"><b>Tự chỉnh giờ (khi không quét được khu vực):</b></label>
         <div class="row" style="margin-top:6px;flex-wrap:wrap">
@@ -93,14 +94,14 @@ const Timer={
           </div>
           <div class="muted" style="margin-top:3px">${dateStr} • <b>${U.esc(c.region||c.tz)}</b> (${U.esc(Core.clockLabel())})</div>
         </div>
-        ${showPanelBtn?`<button class="btn sm pri" data-a="openPanel" title="Mở bảng tùy chỉnh thời gian sử dụng">${sv(IP.gear,15)} Bảng tùy chỉnh</button>`:''}
       </div>
-      <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px">
-        <button class="btn sm moss grow" data-a="scanLoc" ${this._scanning?'disabled':''}>${sv(IP.pin,15)} ${this._scanning?'Đang quét vị trí...':'Auto quét vị trí / giờ'}</button>
-        <button class="btn sm ${this._clockPanel==='tz'?'mid':''}" data-clk="tz">${sv(IP.globe,15)} Múi giờ</button>
-        <button class="btn sm ${this._clockPanel==='manual'?'mid':''}" data-clk="manual">${sv(IP.clock,15)} Tự set giờ</button>
-      </div>
-      ${sub}
+      ${clkLocked
+        ?'<div class="muted" style="margin-top:8px">🔒 Đang trong giờ ngủ 8 tiếng — tạm khóa chỉnh múi giờ/giờ thủ công để giữ lịch ngủ.</div>'
+        :`<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px">
+            <button class="btn sm moss grow" data-a="scanLoc" ${this._scanning?'disabled':''}>${sv(IP.pin,15)} ${this._scanning?'Đang quét vị trí...':'Auto quét vị trí / giờ'}</button>
+            <button class="btn sm ${this._clockPanel==='tz'?'mid':''}" data-clk="tz">${sv(IP.globe,15)} Múi giờ</button>
+            <button class="btn sm ${this._clockPanel==='manual'?'mid':''}" data-clk="manual">${sv(IP.clock,15)} Tự set giờ</button>
+          </div>${sub}`}
     </div>`;
   },
 
@@ -111,19 +112,19 @@ const Timer={
     const entries=Object.entries(data).filter(([,m])=>m>0).sort((a,b)=>b[1]-a[1]);
     if(!entries.length){
       return `<p class="muted" style="margin-top:6px">${Bridge.realUsage
-        ?'Chưa ghi nhận phút sử dụng nào hôm nay (hoặc chưa bật quyền Usage Access). Bấm <b>Quét ngay</b> để cập nhật.'
-        :'Đang đo phiên mở web theo giây thực (60 giây = 1 phút). Để quét thời gian tất cả app trên điện thoại hoặc PC, hãy cài <b>App Android</b>, <b>Chrome Extension</b> hoặc <b>App Desktop (Electron)</b>.'}</p>`;
+        ?'Chưa ghi nhận phút sử dụng nào hôm nay (hoặc chưa bật quyền Usage Access). Bấm <b>↻</b> để quét lại.'
+        :'Đang đo phiên mở web theo giây thực (60 giây = 1 phút). Để quét thời gian tất cả app trên điện thoại hoặc PC, hãy dùng <b>App Android</b>, <b>Chrome Extension</b> hoặc <b>App Desktop (Electron)</b>.'}</p>`;
     }
     return entries.slice(0,10).map(([d,m])=>{
       const ik=this.SITE_ICON[d]||'shield';
       const bg=APPS[ik]?APPS[ik].bg:C.mn;
-      const appLim=mode==='apps'?(Number(s.block.appLimits[d])?Number(s.block.appLimits[d])+extra:0):0;
+      const appLim=mode==='apps'?Core.appLimitByDisplay(d):0;
       const cap=mode==='lockdown'?dailyLim:(appLim||60);
       return `<div class="row" style="margin-top:7px">
         <span class="web-ic" style="background:${bg}">${sv(IP[ik]||IP.shield,14)}</span>
         <b class="grow" style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(d)}</b>
         <div style="width:92px">${UI.bar(m/cap*100,appLim&&m>=appLim?'rose':mode==='lockdown'&&m>=dailyLim?'rose':'mid')}</div>
-        <b style="min-width:52px;text-align:right;font-size:12.5px">${m}p${appLim?`/${appLim}p`:''}</b>
+        <b style="min-width:56px;text-align:right;font-size:12.5px">${m}p${appLim?`/${appLim}p`:''}</b>
       </div>`;
     }).join('');
   },
@@ -292,7 +293,7 @@ const Timer={
       const box=m.box.querySelector('#gItems');
       if(Bridge.nativeApps){
         const fKey=this.appField(), apps=this._apps||[], picked=new Set((g[fKey]||[]).map(x=>x.pkg||x));
-        box.innerHTML=`<div class="app-list" style="max-height:190px">${apps.map(a=>`<label class="app-pick ${picked.has(a.pkg)?'on':''}"><input type="checkbox" data-gp="${U.esc(a.pkg)}" data-gn="${U.esc(a.name)}" ${picked.has(a.pkg)?'checked':''}><span><b>${U.esc(a.name)}</b> ${a.running?'<span class="tag moss" style="font-size:10px;padding:1px 6px">Đang mở</span>':''}</span></label>`).join('')||'<p class="muted center">Không có ứng dụng.</p>'}</div>`;
+        box.innerHTML=`<div class="app-list" style="max-height:190px">${this._appsLoading?'<p class="muted center">Đang quét danh sách ứng dụng...</p>':(apps.map(a=>`<label class="app-pick ${picked.has(a.pkg)?'on':''}"><input type="checkbox" data-gp="${U.esc(a.pkg)}" data-gn="${U.esc(a.name)}" ${picked.has(a.pkg)?'checked':''}><span><b>${U.esc(a.name)}</b> ${a.running?'<span class="tag moss" style="font-size:10px;padding:1px 6px">Đang mở</span>':''}</span></label>`).join('')||'<p class="muted center">Không có ứng dụng.</p>')}</div>`;
         box.querySelectorAll('[data-gp]').forEach(cb=>cb.onchange=()=>{
           const pkg=cb.dataset.gp, name=cb.dataset.gn;
           g[fKey]=(g[fKey]||[]).filter(x=>(x.pkg||x)!==pkg);
@@ -394,7 +395,7 @@ const Timer={
 
   html(){
     const s=Core.s;
-    return `${this.clockCard(true)}
+    return `${this.clockCard()}
       <div class="h-grid">
         ${this.modeStatusCardHTML()}
         <div class="col" style="gap:10px">
@@ -406,11 +407,15 @@ const Timer={
             <div class="row">${sv(IP.bedtime,24)}<b class="grow">Khóa ngủ ${s.sleep.bed} → ${s.sleep.wake}</b><button class="btn sm" data-a="sleep">Đổi giờ</button></div>
             <div class="muted" style="margin-top:4px">Chế độ chặn đang bật (1/3): <b>${Core.blockModeLabel()}</b></div>
             <div class="muted" style="margin-top:2px">Nền tảng: <b>${Bridge.mode()}</b></div>
-            <button class="btn sm moss full" style="margin-top:8px" data-a="openPanel">${sv(IP.gear,15)} Mở Bảng tùy chỉnh nhanh</button>
           </div>
         </div>
       </div>
       <div style="margin-top:10px">${this.blockerCard(false)}</div>`;
+  },
+
+  isEditingInside(el){
+    const a=document.activeElement;
+    return !!(a && el.contains(a) && (a.tagName==='INPUT'||a.tagName==='SELECT'||a.tagName==='TEXTAREA'));
   },
 
   bindEvents(el, draw, onSleep, onCloseSheet){
@@ -432,14 +437,13 @@ const Timer={
       if(a==='-'){ Core.setLimit(Math.max(15,sc.limit-15)); draw(); }
       if(a==='+'){ Core.setLimit(Math.min(480,sc.limit+15)); draw(); }
       if(a==='ov') Overlays.screen(true);
-      if(a==='openPanel') openUsageSettings();
       if(a==='sleep'){ if(onSleep) onSleep(); else { onCloseSheet&&onCloseSheet(); Nav.go('health','#sleep'); } }
       if(a==='goRemind'){ onCloseSheet&&onCloseSheet(); if(document.body.dataset.page==='health'&&typeof HealthPage!=='undefined') HealthPage.tab('remind'); else Nav.go('health','#remind'); }
       if(a==='goFull'){ onCloseSheet&&onCloseSheet(); if(document.body.dataset.page==='health'&&typeof HealthPage!=='undefined') HealthPage.tab('timer'); else Nav.go('health','#timer'); }
       if(a==='refreshPcApps'){ this.ensureApps(()=>{ UI.toast('Đã cập nhật danh sách ứng dụng PC!'); draw(); }, true); draw(); }
       if(a==='rescan'){
-        const u=await Bridge.getUsage();
-        if(u){ Core.s.screen.allSites=u.allSites||u.allApps||u.sites||u.apps||{}; Core.s.screen.sites=u.sites||u.apps||{}; Core.s.screen.totalUsed=u.totalMinutes??u.minutes??Core.s.screen.totalUsed; Core.save(); UI.toast('Đã quét cập nhật thời gian dùng thật!'); }
+        const u=await Core.syncUsageNow();
+        if(u) UI.toast('Đã quét cập nhật thời gian dùng thật!');
         else UI.toast('Đang đo thời gian phiên web theo giây thực.');
         draw();
       }
@@ -447,20 +451,28 @@ const Timer={
         this._scanning=true; draw();
         const r=await Core.scanLocationTime(); this._scanning=false;
         UI.toast(r.ok?`Đã quét giờ: ${r.tz} (${r.region})`:r.region);
-        if(!r.ok) this._clockPanel='tz';
+        if(!r.ok && r.source!=='locked') this._clockPanel='tz';
         draw();
       }
       if(a==='applyTz'){
         const custom=(el.querySelector('#tzCustom').value||'').trim(), tz=custom||el.querySelector('#tzSel').value;
         try{ new Intl.DateTimeFormat('en-US',{timeZone:tz}); }catch(e){ UI.toast('Múi giờ không hợp lệ (vd: Asia/Ho_Chi_Minh)'); return; }
         const label=(DATA.TIMEZONES.find(x=>x.tz===tz)||{}).label||tz;
-        Core.setClockTimezone(tz,label); this._clockPanel=null; UI.toast(`Đã chuyển sang múi giờ ${tz}`); draw();
+        const r=Core.setClockTimezone(tz,label);
+        if(!r.ok){ UI.toast(r.msg); return; }
+        this._clockPanel=null; UI.toast(`Đã chuyển sang múi giờ ${tz}`); draw();
       }
       if(a==='applyMan'){
         const hm=el.querySelector('#manTime').value, dt=el.querySelector('#manDate').value;
-        if(Core.setClockManual(hm,dt)){ this._clockPanel=null; UI.toast(`Đã đặt đồng hồ thủ công: ${hm}`); draw(); }
+        const r=Core.setClockManual(hm,dt);
+        if(!r.ok){ UI.toast(r.msg); return; }
+        this._clockPanel=null; UI.toast(`Đã đặt đồng hồ thủ công: ${hm}`); draw();
       }
-      if(a==='resetAuto'){ Core.setClockAuto(ClockUtil.deviceTz(),'Tự động theo thiết bị'); this._clockPanel=null; UI.toast('Đã về giờ tự động theo thiết bị'); draw(); }
+      if(a==='resetAuto'){
+        const r=Core.setClockAuto(ClockUtil.deviceTz(),'Tự động theo thiết bị');
+        if(!r.ok){ UI.toast(r.msg); return; }
+        this._clockPanel=null; UI.toast('Đã về giờ tự động theo thiết bị'); draw();
+      }
       if(a==='addDom'){
         const d=(el.querySelector('#customDom').value||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').split('/')[0];
         if(!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)){ UI.toast('Tên miền chưa hợp lệ (vd: twitch.tv)'); return; }
@@ -482,7 +494,15 @@ const Timer={
     el.querySelectorAll('[data-rmem]').forEach(b=>b.onclick=()=>{ const k=this.emField(); Core.setEmergency(k,(Core.s.block[k]||[]).filter(x=>(x.pkg||x)!==b.dataset.rmem)); draw(); });
     el.querySelectorAll('[data-lim]').forEach(sel=>sel.onchange=()=>{ Core.setAppLimit(sel.dataset.lim,+sel.value); UI.toast(`Đã đặt giới hạn riêng ${sel.value} phút`); draw(); });
     el.querySelectorAll('[data-edgrp]').forEach(b=>b.onclick=()=>{ const g=Core.s.block.groups.find(x=>x.id===b.dataset.edgrp); if(g) this.openGroupEditor(g,draw); });
-    el.querySelectorAll('[data-delgrp]').forEach(b=>b.onclick=()=>{ if(confirm('Xóa nhóm ứng dụng này?')){ Core.deleteGroup(b.dataset.delgrp); draw(); } });
+    el.querySelectorAll('[data-delgrp]').forEach(b=>b.onclick=()=>{
+      const g=Core.s.block.groups.find(x=>x.id===b.dataset.delgrp);
+      UI.confirm({
+        title:`Xóa nhóm "${U.esc(g?g.name:'này')}"?`,
+        body:'Các ứng dụng trong nhóm này sẽ không còn bị giới hạn theo nhóm nữa.',
+        okLabel:'Xóa nhóm', okCls:'rose',
+        onOk:()=>{ Core.deleteGroup(b.dataset.delgrp); draw(); }
+      });
+    });
     el.querySelectorAll('[data-perm]').forEach(b=>b.onclick=()=>{ try{ window.LuaChillNative.openPermissionSettings(b.dataset.perm); }catch(e){} });
     const pcAuto=el.querySelector('#pcAutoLaunch');
     if(pcAuto && window.LuaChillDesktop && window.LuaChillDesktop.setAutoLaunch){
@@ -508,14 +528,14 @@ const Timer={
 
   render(el,onSleep){
     let alive=true;
-    const draw=()=>{ if(!alive) return; this.ensureApps(()=>{ if(alive&&!el.contains(document.activeElement)) draw(); }); el.innerHTML=this.html();
+    const draw=()=>{ if(!alive) return; this.ensureApps(()=>{ if(alive&&!this.isEditingInside(el)) draw(); }); el.innerHTML=this.html();
       this.bindEvents(el,draw,onSleep,null); };
     draw();
     const off=Core.on('tick',()=>{
       const lk=el.querySelector('#liveClk');
       if(lk){ const n=Core.now(); lk.textContent=`${U.hm(n)}:${U.pad(n.getSeconds())}`; }
     });
-    const off2=Core.on('change',()=>{ if(!el.contains(document.activeElement)) draw(); });
+    const off2=Core.on('change',()=>{ if(!this.isEditingInside(el)) draw(); });
     return ()=>{ alive=false; off(); off2(); };
   }
 };
@@ -533,11 +553,12 @@ function openUsageSettings(tabStart='mode'){
     }
   }});
   let alive=true;
+  const onHealthTimer=document.body.dataset.page==='health'&&typeof HealthPage!=='undefined'&&HealthPage.cur==='timer';
   const draw=()=>{
     if(!alive) return;
-    Timer.ensureApps(()=>{ if(alive&&!sh.body.contains(document.activeElement)) draw(); });
+    Timer.ensureApps(()=>{ if(alive&&!Timer.isEditingInside(sh.body)) draw(); });
     const bodyHTML=tab==='clock'
-      ? Timer.clockCard(false)
+      ? Timer.clockCard()
       : Timer.blockerCard(true);
     sh.body.innerHTML=`<div class="seg" style="margin-bottom:10px">
         <button class="${tab==='mode'?'on':''}" data-ut="mode">${sv(IP.shield,14)} Chế độ khóa & Giới hạn (1/3)</button>
@@ -547,7 +568,7 @@ function openUsageSettings(tabStart='mode'){
       <div class="row" style="margin-top:10px;flex-wrap:wrap">
         <button class="btn sm grow" data-a="sleep">${sv(IP.bedtime,15)} Giờ ngủ 8 tiếng</button>
         <button class="btn sm grow" data-a="goRemind">${sv(IP.bell,15)} Nhắc hẹn</button>
-        <button class="btn sm pri grow" data-a="goFull">${sv(IP.shield,15)} Mở trang Sức Khỏe</button>
+        ${onHealthTimer?'':`<button class="btn sm pri grow" data-a="goFull">${sv(IP.shield,15)} Mở trang Sức Khỏe</button>`}
       </div>`;
     sh.body.querySelectorAll('[data-ut]').forEach(b=>b.onclick=()=>{ tab=b.dataset.ut; draw(); });
     Timer.bindEvents(sh.body,draw,null,()=>sh.close());
@@ -558,7 +579,7 @@ function openUsageSettings(tabStart='mode'){
     const lk=sh.body.querySelector('#liveClk');
     if(lk){ const n=Core.now(); lk.textContent=`${U.hm(n)}:${U.pad(n.getSeconds())}`; }
   }));
-  sh.track(Core.on('change',()=>{ if(!sh.body.contains(document.activeElement)) draw(); }));
+  sh.track(Core.on('change',()=>{ if(!Timer.isEditingInside(sh.body)) draw(); }));
   return sh;
 }
 
@@ -567,7 +588,10 @@ function openUsageSettings(tabStart='mode'){
    ============================================================================= */
 const Reminders={
   permStatus(){
-    if(Bridge.android||Bridge.electron||Bridge.ext) return 'granted';
+    if(Bridge.android){
+      try{ return JSON.parse(window.LuaChillNative.getPermissions()).notify?'granted':'denied'; }catch(e){ return 'granted'; }
+    }
+    if(Bridge.electron||Bridge.ext) return 'granted';
     if(typeof Notification==='undefined') return 'unsupported';
     return Notification.permission;
   },
@@ -584,10 +608,9 @@ const Reminders={
         </div>
 
         <div class="card row" style="padding:10px 12px;margin-bottom:10px;flex-wrap:wrap">
-          <div class="grow"><b>Thông báo hệ thống</b><div class="muted">${perm==='granted'?'Đã cấp quyền thông báo ✓':perm==='denied'?'Trình duyệt đang chặn thông báo — hãy mở lại trong Cài đặt web.':'Cấp quyền để nhận thông báo đẩy từ thiết bị.'}</div></div>
+          <div class="grow"><b>Thông báo hệ thống</b><div class="muted">${perm==='granted'?'Đã cấp quyền thông báo ✓':perm==='denied'?'Thông báo đang bị tắt — hãy mở lại trong Cài đặt.':'Cấp quyền để nhận thông báo đẩy từ thiết bị.'}</div></div>
           ${perm==='default'?`<button class="btn sm pri" id="rPerm">Cấp quyền</button>`:''}
-          ${Bridge.android?`<button class="btn sm" id="rAndPerm">Cài đặt thông báo</button>`:''}
-          <button class="btn sm moss" id="rTest">${sv(IP.bell,15)} Thử nhắc</button>
+          ${Bridge.android&&perm!=='granted'?`<button class="btn sm pri" id="rAndPerm">Bật thông báo</button>`:''}
         </div>
 
         <div class="col" style="${r.enabled?'':'opacity:.55;pointer-events:none'}">
@@ -615,7 +638,7 @@ const Reminders={
           </div>
 
           <div class="card" style="padding:12px">
-            <div class="row"><span class="ico">${sv(IP.clock,24)}</span><div class="grow"><b>Nhắc gần chạm giới hạn màn hình</b><div class="muted">Cảnh báo trước khi khóa tổng thời gian hoặc khóa nhóm app</div></div><label class="sw-tog"><input type="checkbox" data-rk="limitWarn" ${r.limitWarn?'checked':''}><span></span></label></div>
+            <div class="row"><span class="ico">${sv(IP.clock,24)}</span><div class="grow"><b>Nhắc gần chạm giới hạn màn hình</b><div class="muted">Cảnh báo trước khi chạm giới hạn hằng ngày, giới hạn từng app hoặc nhóm app</div></div><label class="sw-tog"><input type="checkbox" data-rk="limitWarn" ${r.limitWarn?'checked':''}><span></span></label></div>
             <div class="row" style="margin-top:8px"><span class="muted grow">Cảnh báo khi còn:</span>
               <div class="row" style="gap:5px">${[5,10,15,20].map(m=>`<button class="btn sm ${r.limitLead===m?'mid':''}" data-ll="${m}">${m}p</button>`).join('')}</div>
             </div>
@@ -627,13 +650,15 @@ const Reminders={
       if(rp) rp.onclick=async()=>{ try{ const res=await Notification.requestPermission(); UI.toast(res==='granted'?'Đã bật thông báo!':'Bạn chưa cấp quyền thông báo'); draw(); }catch(e){} };
       const ap=el.querySelector('#rAndPerm');
       if(ap) ap.onclick=()=>{ try{ window.LuaChillNative.openPermissionSettings('notify'); }catch(e){} };
-      el.querySelector('#rTest').onclick=()=>{ Bridge.notify('Lừa Chill 🔔','Nhắc hẹn đang hoạt động! Hãy uống 1 ly nước và giữ mắt nghỉ ngơi nhé.'); UI.toast('🔔 Đã gửi thông báo thử!'); };
       el.querySelectorAll('[data-rk]').forEach(cb=>cb.onchange=()=>{ Core.setReminder({[cb.dataset.rk]:cb.checked}); });
-      el.querySelectorAll('[data-rt]').forEach(inp=>inp.onchange=()=>{ Core.setReminder({[inp.dataset.rt]:inp.value}); UI.toast('Đã lưu giờ nhắc '+inp.value); });
+      el.querySelectorAll('[data-rt]').forEach(inp=>inp.onchange=()=>{
+        if(!/^\d{2}:\d{2}$/.test(inp.value||'')){ inp.value=Core.s.reminders[inp.dataset.rt]||'10:00'; return; }
+        Core.setReminder({[inp.dataset.rt]:inp.value}); UI.toast('Đã lưu giờ nhắc '+inp.value);
+      });
       el.querySelectorAll('[data-bl]').forEach(b=>b.onclick=()=>{ Core.setReminder({bedLead:+b.dataset.bl}); draw(); });
       el.querySelectorAll('[data-ll]').forEach(b=>b.onclick=()=>{ Core.setReminder({limitLead:+b.dataset.ll}); draw(); });
     };
     draw();
-    return Core.on('change',()=>{ if(!el.contains(document.activeElement)) draw(); });
+    return Core.on('change',()=>{ if(!Timer.isEditingInside(el)) draw(); });
   }
 };

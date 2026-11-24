@@ -2,9 +2,15 @@
 'use strict';
 const { contextBridge, ipcRenderer } = require('electron');
 
+let pendingAuthHash = null;
+let authListener = null;
+
 ipcRenderer.on('lc:authCallback', (_, hash) => {
-  if (typeof window.__onAuthCallback === 'function') {
-    window.__onAuthCallback(hash);
+  if (!hash) return;
+  if (typeof authListener === 'function') {
+    try { authListener(hash); } catch (_) {}
+  } else {
+    pendingAuthHash = hash;
   }
 });
 
@@ -16,5 +22,14 @@ contextBridge.exposeInMainWorld('LuaChillDesktop', {
   getSettings: () => ipcRenderer.invoke('lc:getSettings'),
   setAutoLaunch: enabled => ipcRenderer.invoke('lc:setAutoLaunch', !!enabled),
   openAuth: url => ipcRenderer.send('lc:openAuth', String(url || '')),
+  consumeAuth: () => ipcRenderer.invoke('lc:consumeAuth'),
+  onAuthCallback: cb => {
+    authListener = typeof cb === 'function' ? cb : null;
+    if (authListener && pendingAuthHash) {
+      const h = pendingAuthHash;
+      pendingAuthHash = null;
+      try { authListener(h); } catch (_) {}
+    }
+  },
   notify: payload => ipcRenderer.send('lc:notify', payload || {})
 });

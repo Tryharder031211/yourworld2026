@@ -32,21 +32,8 @@ function safeRoom(r){
   return {wall:'#F7F4D5',floor:'#c99a6b',placed:[{uid:'s1',id:'bed',gx:0,gy:1,rot:0},{uid:'s2',id:'plant',gx:5,gy:0,rot:0}]};
 }
 
-/* ---------------- Hộp thoại xác nhận Doodle (tương thích Dark & Light Mode) ---------------- */
-function confirmSocialAction({title, body, okLabel='Xác nhận', okCls='rose', onOk}){
-  const m=UI.modal(`<div class="row"><h3 class="grow txt-accent">${title}</h3><button class="x-btn" data-x>${sv(IP.x,16)}</button></div>
-    <p class="muted" style="margin:8px 0 12px">${body}</p>
-    <div class="row">
-      <button class="btn grow" data-x>Để sau</button>
-      <button class="btn ${okCls} grow" data-ok>${okLabel}</button>
-    </div>`);
-  m.box.querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>m.close());
-  m.box.querySelector('[data-ok]').onclick=async()=>{
-    const btn=m.box.querySelector('[data-ok]'); btn.disabled=true;
-    try{ await onOk(); m.close(); }
-    catch(e){ btn.disabled=false; UI.toast('Lỗi: '+(e.message||e)); }
-  };
-}
+/* ---------------- Hộp thoại xác nhận Doodle (dùng chung UI.confirm) ---------------- */
+function confirmSocialAction(opts){ return UI.confirm(opts); }
 
 /* ---------------- Ghé thăm phòng người chơi thật ---------------- */
 async function visitUser(pOrId, onMutate){
@@ -84,7 +71,7 @@ async function visitUser(pOrId, onMutate){
       <span class="tag">${sv(IP.quest,12)} ${p.quests_total||0} quest</span>
     </div>
     <div class="card" style="background:linear-gradient(#e9e3bd,#F7F4D5);padding:4px">
-      <svg viewBox="0 -6 390 330" width="100%">${roomSVG(safeRoom(p.room))}</svg>
+      <svg viewBox="0 -6 390 330" width="100%">${roomSVG(safeRoom(p.room),{roomId:(p.room&&p.room.roomId)||'bedroom'})}</svg>
     </div>
     ${isMe?'':`<div class="row" style="margin-top:10px;flex-wrap:wrap">${relBtns}</div>`}`);
   fixAvatars(m.box);
@@ -289,10 +276,11 @@ function openDM(p){
 }
 
 /* ---------------- Bộ vẽ Bảng Lời Mời Kết Bạn (dùng chung cho Sheet riêng & Tab Lời mời) ---------------- */
-async function renderRequestsBoard(body, onUpdated){
+async function renderRequestsBoard(body, onUpdated, isStale){
   body.innerHTML='<p class="muted center">Đang tải bảng lời mời kết bạn...</p>';
   try{
     const {incoming,outgoing}=await Cloud.pending();
+    if(isStale&&isStale()) return;
     const inHTML=incoming.length?incoming.map(p=>`<div class="fr-card card tint-warm">
       <div class="row">
         ${avHTML(p,42)}
@@ -363,7 +351,10 @@ async function renderRequestsBoard(body, onUpdated){
 /* ---------------- Bảng Lời Mời Kết Bạn chuyên biệt (mở nhanh từ HUD / Bạn bè / Cài đặt) ---------------- */
 function openFriendRequests(){
   const sh=UI.sheet({title:'Bảng Lời Mời Kết Bạn',icon:'user',cls:'wide'});
+  let seq=0, alive=true;
+  sh.track(()=>{ alive=false; });
   const draw=async()=>{
+    const my=++seq;
     if(!Cloud.online){
       sh.body.innerHTML=authGateHTML('Bảng lời mời kết bạn');
       bindOAuth(sh.body);
@@ -376,7 +367,7 @@ function openFriendRequests(){
         <button class="btn sm grow" data-go="blocked">${sv(IP.ban,15)} Đã chặn (${Cloud.blocked.length})</button>
       </div>`;
     sh.body.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ sh.close(); openFriends(b.dataset.go); });
-    await renderRequestsBoard(sh.body.querySelector('#reqBoard'),draw);
+    await renderRequestsBoard(sh.body.querySelector('#reqBoard'),draw,()=>!alive||my!==seq);
   };
   draw();
   sh.track(Cloud.on('auth',draw));
@@ -386,11 +377,20 @@ function openFriendRequests(){
 function openFriends(initialTab='global'){
   const sh=UI.sheet({title:'Cộng Đồng & Bạn Bè',icon:'chat',cls:'wide'});
   let focusFind=initialTab==='find';
-  let tab=(!initialTab||initialTab==='find')?'global':initialTab, cleanup=null;
+  let tab=(!initialTab||initialTab==='find')?'global':initialTab, cleanup=null, seq=0, alive=true;
   const clearSub=()=>{ if(cleanup){ cleanup(); cleanup=null; } };
-  sh.track(clearSub);
+  sh.track(()=>{ alive=false; clearSub(); });
+
+  const syncTabLabels=()=>{
+    const tabs=sh.body.querySelector('.soc-tabs'); if(!tabs) return;
+    const inN=Cloud.incomingIds.length, blkN=Cloud.blocked.length;
+    const bf=tabs.querySelector('[data-k=friends]'); if(bf) bf.textContent=`Bạn bè (${Cloud.friendIds.length})`;
+    const bp=tabs.querySelector('[data-k=pending]'); if(bp) bp.textContent=`Lời mời${inN?` (${inN})`:''}`;
+    const bb=tabs.querySelector('[data-k=blocked]'); if(bb) bb.textContent=`Đã chặn${blkN?` (${blkN})`:''}`;
+  };
 
   const render=async()=>{
+    const my=++seq;
     clearSub();
     if(!Cloud.online){
       sh.body.innerHTML=authGateHTML('Chat online & Bạn bè');
@@ -519,6 +519,7 @@ function openFriends(initialTab='global'){
       body.innerHTML='<p class="muted center">Đang tải danh sách bạn bè...</p>';
       try{
         const list=await Cloud.friends();
+        if(!alive||my!==seq) return;
         const topTools=`<div class="row" style="margin-bottom:10px;flex-wrap:wrap">
           <button class="btn sm ${Cloud.incomingIds.length?'rose':'moss'} grow" data-open-req>${sv(IP.user,15)} Bảng lời mời kết bạn${Cloud.incomingIds.length?` (${Cloud.incomingIds.length})`:''}</button>
           <button class="btn sm pri" data-go-find>${sv(IP.plus,15)} Thêm bạn</button>
@@ -577,7 +578,7 @@ function openFriends(initialTab='global'){
     }
 
     if(tab==='pending'){
-      await renderRequestsBoard(body,render);
+      await renderRequestsBoard(body,render,()=>!alive||my!==seq);
       return;
     }
 
@@ -585,6 +586,7 @@ function openFriends(initialTab='global'){
     body.innerHTML='<p class="muted center">Đang tải danh sách đã chặn...</p>';
     try{
       const rows=await Cloud.blockedProfiles();
+      if(!alive||my!==seq) return;
       const byId=Object.fromEntries(rows.map(p=>[p.id,p]));
       const ids=Cloud.blocked.slice();
       if(!ids.length){
@@ -618,12 +620,15 @@ function openFriends(initialTab='global'){
 
   render();
   sh.track(Cloud.on('auth',render));
+  sh.track(Cloud.on('friends',syncTabLabels));
+  sh.track(Cloud.on('blocks',syncTabLabels));
 }
 
 /* ---------------- Bảng xếp hạng trực tuyến thật ---------------- */
 function openLeaderboard(){
   const sh=UI.sheet({title:'Bảng Xếp Hạng',icon:'trophy',cls:'wide'});
-  let tab='gems', scope='global';
+  let tab='gems', scope='global', seq=0, alive=true;
+  sh.track(()=>{ alive=false; });
   const TABS=[['gems','Top Gem'],['screen','Ít Dùng Máy'],['quests','Top Quest'],['sleep','Ngủ Ngon']];
   const DESC={
     gems:'Tổng Gem tích lũy từ thói quen lành mạnh.',
@@ -634,6 +639,7 @@ function openLeaderboard(){
   const medal=['#f1d77a','#cfd3d6','#e0b27a'];
 
   const render=async()=>{
+    const my=++seq;
     if(!Cloud.online){
       sh.body.innerHTML=authGateHTML('Bảng Xếp Hạng trực tuyến');
       bindOAuth(sh.body);
@@ -654,6 +660,7 @@ function openLeaderboard(){
     try{
       if(Date.now()-(Cloud.lastPush||0)>30e3) Cloud.push().catch(()=>{});
       const list=await Cloud.board(tab,scope);
+      if(!alive||my!==seq) return;
       if(!list||!list.length){
         box.innerHTML=`<div class="card center" style="padding:16px"><p class="muted">Chưa có dữ liệu cho mục này${tab==='screen'?' hôm nay':''}. Bấm "Cập nhật điểm" để lên bảng nhé!</p></div>`;
         return;

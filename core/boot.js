@@ -66,21 +66,26 @@ const HealthPage={
     el.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>this.tab(b.dataset.t));
     const q=new URLSearchParams(location.search); this.blocked=q.get('blocked'); this.reason=q.get('reason');
     App.show('health'); this.tab((location.hash||'#timer').slice(1)); this.gem();
-    if(this.blocked){ if(this.reason==='bed' && Core.isBedtime() && !Core.s.night.broken) Overlays.bed(true); else if(Core.s.screen.locked) Overlays.screen(true,{site:this.blocked}); } },
+    Core.syncUsageNow().then(()=>{
+      if(!this.blocked) return;
+      if(this.reason==='bed' && Core.isBedtime() && !Core.s.night.broken) Overlays.bed(true);
+      else if(this.reason!=='bed' && Core.isBlockedTargetLocked(this.blocked)) Overlays.screen(true,{site:this.blocked});
+    }); },
   gem(){ const g=document.getElementById('hGem'); if(g) g.textContent=Core.s.gems; },
-  tab(t){ if(!this.TABS.some(x=>x[0]===t)) t='timer'; this.cur=t; if(this.off){ this.off(); this.off=null; }
+  tab(t){ if(!this.TABS.some(x=>x[0]===t)) t='timer'; this.cur=t; if(this.off){ this.off(); this.off=null; } if(this.offCard){ this.offCard(); this.offCard=null; }
     document.querySelectorAll('#health [data-t]').forEach(b=>b.classList.toggle('on',b.dataset.t===t)); history.replaceState(null,'',location.pathname+location.search+'#'+t);
-    const body=document.getElementById('hBody'); body.innerHTML=''; if(this.blocked) body.appendChild(this.blockedCard());
+    const body=document.getElementById('hBody'); body.innerHTML=''; if(this.blocked){ const bc=this.blockedCard(); body.appendChild(bc.el); this.offCard=bc.off; }
     const box=document.createElement('div'); body.appendChild(box);
     this.off = t==='timer'?Timer.render(box,()=>this.tab('sleep'))
       : t==='remind'?Reminders.render(box)
       : t==='tasks'?Tasks.render(box)
       : SleepLock.render(box); },
   blockedCard(){ const d=document.createElement('div'); d.className='card h-hero tint-rose';
-    const upd=()=>{ const open=!Core.s.screen.locked && !(Core.isBedtime()&&!Core.s.night.broken);
-      d.innerHTML=`${sv(IP.lock,34)}<div class="grow"><b>Bạn vừa được đưa ra khỏi ${U.esc(this.blocked)}</b><div class="muted">${open?'Đã mở khóa — dùng có chừng mực nhé!':this.reason==='bed'?'Đang giờ ngủ 8 tiếng. Đi ngủ thôi!':'Hết giờ màn hình. Làm 1 Quest để +5 phút.'}</div></div>${open&&!Bridge.android&&!Bridge.electron?`<button class="btn sm moss" data-a="back">Mở lại</button>`:''}`;
+    const upd=()=>{ const bedLocked=Core.isBedtime()&&!Core.s.night.broken;
+      const open=this.reason==='bed'?!bedLocked:(!bedLocked && !Core.isBlockedTargetLocked(this.blocked));
+      d.innerHTML=`${sv(IP.lock,34)}<div class="grow"><b>Bạn vừa được đưa ra khỏi ${U.esc(this.blocked)}</b><div class="muted">${open?'Đã mở khóa — dùng có chừng mực nhé!':this.reason==='bed'?'Đang giờ ngủ 8 tiếng. Đi ngủ thôi!':'Đã chạm giới hạn sử dụng. Làm 1 Quest để +5 phút.'}</div></div>${open&&!Bridge.android&&!Bridge.electron&&/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(this.blocked||'')?`<button class="btn sm moss" data-a="back">Mở lại</button>`:''}`;
       const b=d.querySelector('[data-a=back]'); if(b) b.onclick=()=>{ location.href='https://'+this.blocked; }; };
-    upd(); Core.on('change',upd); return d; }
+    upd(); const off=Core.on('change',upd); return {el:d,off}; }
 };
 
 /* ---------------- Khởi động chung ---------------- */
@@ -92,11 +97,21 @@ const Boot={
     UI.app.addEventListener('contextmenu',e=>e.preventDefault());
     /* Callback cho app Android (Custom Tabs) & Electron PC (trình duyệt mặc định) trả token OAuth */
     window.__onAuthCallback=async hash=>{
-      if(typeof Cloud!=='undefined') await Cloud.handleHash(hash,false);
+      if(typeof Cloud==='undefined'||!hash) return;
+      if(Bridge.android && window.LuaChillNative.consumePendingAuth){ try{ window.LuaChillNative.consumePendingAuth(); }catch(e){} }
+      if(Bridge.electron && window.LuaChillDesktop.consumeAuth){ try{ await window.LuaChillDesktop.consumeAuth(); }catch(e){} }
+      await Cloud.handleHash(hash,false);
     };
-    /* Callback khi quay lại ứng dụng Android từ Cài đặt quyền hệ thống */
+    /* Nhận sự kiện OAuth qua contextBridge của Electron (contextIsolation: true tách riêng window) */
+    if(Bridge.electron && window.LuaChillDesktop.onAuthCallback){
+      window.LuaChillDesktop.onAuthCallback(hash=>window.__onAuthCallback(hash));
+    }
+    /* Callback khi quay lại ứng dụng Android từ Cài đặt quyền hoặc trình duyệt đăng nhập */
     window.__onAppResume=()=>{
-      if(typeof Core!=='undefined'&&Core.s){ Core.emit('change'); Core.tick(); }
+      if(Bridge.android && window.LuaChillNative.consumePendingAuth){
+        try{ const h=window.LuaChillNative.consumePendingAuth(); if(h) window.__onAuthCallback(h); }catch(e){}
+      }
+      if(typeof Core!=='undefined'&&Core.s){ Core.syncUsageNow(); Core.emit('change'); Core.tick(); }
     };
     if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
       navigator.serviceWorker.register(Nav.root+'sw.js').catch(()=>{});
@@ -131,7 +146,8 @@ const Boot={
         if(typeof Cloud!=='undefined'){ Cloud.on('auth',()=>HUD.update()); Cloud.on('friends',()=>HUD.update()); }
         Loop.add(dt=>{ if(App.cur==='lobby') Lobby.update(dt); }); }
       App.show('lobby'); Lobby.setAcc(); HUD.setAcc(); HUD.update(); Lobby.refresh(); Lobby.showHint(); this.common();
-      if(Nav.takeTp()) Lobby.arrive(); };
+      if(Nav.takeTp()) Lobby.arrive();
+      if(location.hash==='#requests'){ history.replaceState(null,'',location.pathname+location.search); if(typeof openFriendRequests==='function') openFriendRequests(); } };
     const go=()=>{ try{ sessionStorage.setItem('lc_boot','1'); }catch(e){} enter(); };
     if(Core.s && Nav.booted()) enter();
     else { Start.render(go); if(typeof Cloud!=='undefined') Cloud.on('auth',()=>{ if(App.cur==='start') Start.render(go); }); } },
@@ -140,7 +156,6 @@ const Boot={
   fomo(){ Hub.init(); ShopUI.init(); MonsterGame.init(); Core.on('acc',()=>Hub.setAcc()); Core.on('change',()=>Hub.refresh());
     Loop.add(dt=>{ if(App.cur==='shopping') ShopUI.update(dt); else if(App.cur==='monster') MonsterGame.update(dt); });
     this.common();
-    if(location.hash==='#demo-month'){ history.replaceState(null,'',location.pathname); App.show('hub'); Hub.resize(); ShopUI.demoMonthEnd(); }
-    else if(Nav.takeTp()) Hub.arrive(); else { App.show('hub'); Hub.resize(); } }
+    if(Nav.takeTp()) Hub.arrive(); else { App.show('hub'); Hub.resize(); } }
 };
 Boot.start();

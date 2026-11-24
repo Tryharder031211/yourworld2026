@@ -18,7 +18,7 @@ const MonsterGame={
     this.imgs={}; for(const g of this.GOOD) this.imgs[g.ic]=toImg(sv(IP[g.ic],48)); this.imgs.fire=toImg(sv(IP.fire,40)); this.imgs.notif=toImg(sv(IP.notif,40));
     this.dk=new Donkey({scale:.95,tilt:-18,acc:Core.s.acc.on,mood:'normal'}); this.world.appendChild(this.dk.el);
     this.mv=new Mover(195,this.GROUND,190); this.dk.pos(195,this.GROUND);
-    el.querySelector('[data-a=back]').onclick=()=>{ this.playing=false; App.show('hub'); Hub.resize(); };
+    el.querySelector('[data-a=back]').onclick=()=>{ this.playing=false; App.show('hub'); Hub.resize(); if(Hub.dk) Hub.dk.el.classList.remove('tp-out','tp-in'); };
     this.bind(); new ResizeObserver(()=>this.resize()).observe(this.stage); },
   resize(){ const W=this.stage.clientWidth, H=this.stage.clientHeight; if(!W||!H) return; const s=this.sc=Math.min(W/this.W,H/this.H); this.ox=(W-this.W*s)/2; this.oy=(H-this.H*s)/2;
     this.world.style.transform=`translate(${this.ox}px,${this.oy}px) scale(${s})`; const r=Math.min(3,(window.devicePixelRatio||1)*s);
@@ -62,12 +62,12 @@ const MonsterGame={
   pop(x,y,text,color){ this.pops.push({x,y,text,color,t:1}); },
   end(win){ this.playing=false; const score=this.score+(win?50:0), gem=Math.max(5,Math.min(80,Math.round(score/4))+(win?10:0));
     Core.finishMonster(score,gem);
-    const m=UI.modal(`<div class="center">${win?sv(IP.trophy,72):sv(IP.monster,90)}<h2 style="color:${win?C.mn:'#a5584c'}">${win?'Bạn đã thắng FOMO!':'Quái vật FOMO đã nuốt mất thời gian của bạn!'}</h2>
+    const m=UI.modal(`<div class="center">${win?sv(IP.trophy,72):sv(IP.monster,90)}<h2 class="${win?'txt-accent':'txt-danger'}">${win?'Bạn đã thắng FOMO!':'Quái vật FOMO đã nuốt mất thời gian của bạn!'}</h2>
       <p style="font-weight:700;margin:6px 0">Gom <b>${this.caught}</b> thói quen tốt • Né <b>${this.dodged}</b> mồi FOMO • Điểm <b>${score}</b></p>
       <p class="muted">${win?'Bình tĩnh trước thông báo & sale sốc giúp bạn giữ được thời gian cho điều quan trọng.':'Mỗi thông báo, mỗi "sale sốc" đều cố kéo sự chú ý của bạn. Thử tắt bớt thông báo nhé!'}</p>
       <div class="row" style="margin-top:10px"><button class="btn grow" data-a="hub">Về khu giải trí</button><button class="btn pri grow" data-a="again">Chơi lại</button></div>
       <p class="muted" style="margin-top:6px">+${gem} Gem đã cộng vào ví</p></div>`,{dismiss:false});
-    m.box.querySelector('[data-a=hub]').onclick=()=>{ m.close(); App.show('hub'); Hub.resize(); };
+    m.box.querySelector('[data-a=hub]').onclick=()=>{ m.close(); App.show('hub'); Hub.resize(); if(Hub.dk) Hub.dk.el.classList.remove('tp-out','tp-in'); };
     m.box.querySelector('[data-a=again]').onclick=()=>{ m.close(); this.open(); }; },
   draw(){ const c=this.ctx; if(!c) return; const t=performance.now()/1000, W=this.W, H=this.H;
     c.clearRect(0,0,W,H);

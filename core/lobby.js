@@ -7,7 +7,7 @@
 const Lobby={
   OBJ:{
     home:{x:122,y:272,lx:112,ly:200,r:62,open:()=>Nav.go('tycoon')},
-    clock:{x:196,y:280,lx:196,ly:250,r:24,open:()=>openUsageSettings('limit')},
+    clock:{x:196,y:280,lx:196,ly:250,r:24,open:()=>openUsageSettings('mode')},
     garden:{x:175,y:418,lx:175,ly:372,r:62,open:()=>openGarden()},
     pets:{x:331,y:426,lx:331,ly:392,r:30,open:()=>openPets()},
     shop:{x:322,y:134,lx:334,ly:62,r:36,open:()=>goShop()}
@@ -144,7 +144,6 @@ const HUD={
       <div class="hud-r">
         <div class="row" style="gap:6px">
           <button class="icon-btn" id="btnReq" title="Bảng lời mời kết bạn">${sv(IP.user,22)}<span class="req-dot hide" id="reqDot">0</span></button>
-          <button class="icon-btn" id="btnLb" title="Bảng xếp hạng">${sv(IP.trophy,24)}</button>
           <button class="icon-btn" id="btnSet" title="Tài khoản & Cài đặt">${sv(IP.gear,24)}<span class="dot-on hide" id="cloudDot"></span></button>
         </div>
         <div class="clock-pill card" id="hudClock"></div>
@@ -153,10 +152,9 @@ const HUD={
       </div>`;
     this.av=new Donkey({scale:.56,tilt:-14,yaw:28,acc:Core.s.acc.on}); this.av.pos(25,46); document.getElementById('hudAv').appendChild(this.av.el);
     document.getElementById('btnReq').onclick=()=>openFriendRequests();
-    document.getElementById('btnLb').onclick=()=>openLeaderboard();
     document.getElementById('btnSet').onclick=()=>openSettings();
     document.getElementById('hudCheck').onclick=()=>Overlays.morning(Core.s.pendingMorning);
-    document.getElementById('hudClock').onclick=()=>openUsageSettings('limit');
+    document.getElementById('hudClock').onclick=()=>openUsageSettings('mode');
     const nav=document.getElementById('nav');
     nav.innerHTML=[['quest','Sức Khỏe','q'],['chat','Cộng Đồng','f'],['podium','Xếp Hạng','l'],['bag','Túi Đồ','b']].map(([i,t,f])=>`<button data-f="${f}">${sv(IP[i],26)}<span>${t}</span>${i==='quest'?'<span class="badge" id="qBadge"></span>':i==='chat'?'<span class="badge" id="fBadge" style="display:none"></span>':''}</button>`).join('');
     const F={q:()=>Nav.go('health','#tasks'),f:()=>openFriends(),l:()=>openLeaderboard(),b:()=>openBag()};
@@ -180,7 +178,7 @@ const HUD={
       const pct=apps.length?((apps.length-lk)/apps.length*100):100;
       $('bS').style.width=U.clamp(pct)+'%'; $('vS').textContent=lk?lk+'kh':apps.length+'app'; $('bSw').classList.toggle('warn',lk>0);
     }
-    const n=Core.now(); $('hudClock').innerHTML=`${sv(Core.isNight()?IP.moon:IP.sun,15)}${U.hm(n)}${s.offset?'<span style="font-size:9px;opacity:.6">test</span>':''}`;
+    const n=Core.now(); $('hudClock').innerHTML=`${sv(Core.isNight()?IP.moon:IP.sun,15)}${U.hm(n)}`;
     const b=$('hudBuff'); if(Core.hasBuff()){ b.className='tag moss'; b.innerHTML=`${sv(IP.bolt,11)} +20% Gem`; } else if(Core.isTiredToday()){ b.className='tag rose'; b.textContent='Thiếu ngủ'; } else b.className='tag hide';
     $('hudCheck').classList.toggle('hide',!Core.canCheckIn()||Core.isBedtime());
     const dot=$('cloudDot'); if(dot) dot.classList.toggle('hide',!Cloud.online);
@@ -189,7 +187,9 @@ const HUD={
     if(fb){ fb.textContent=pn; fb.style.display=pn?'':'none'; }
     const rd=$('reqDot'); if(rd){ rd.textContent=pn>9?'9+':pn; rd.classList.toggle('hide',!pn); }
     this.av.setMood(Core.mood());
-    const lockTxt=s.screen.locked?`${sv(IP.lock,15)} Hết giờ màn hình • Làm Quest +5 phút`:(Core.isBedtime()&&s.night.broken?`${sv(IP.moon,15)} Đang thức khuya quá ${s.sleep.bed}`:'');
+    const lockTxt=(mode==='lockdown'&&s.screen.locked)?`${sv(IP.lock,15)} Hết giới hạn hằng ngày • Làm Quest +5 phút`
+      :Core.hasAnyLimitLock()?`${sv(IP.lock,15)} Có app/nhóm đang khóa • Làm Quest +5 phút`
+      :(Core.isBedtime()&&s.night.broken?`${sv(IP.moon,15)} Đang thức khuya quá ${s.sleep.bed}`:'');
     this.chip.classList.toggle('hide',!lockTxt); this.chip.innerHTML=lockTxt; },
   setAcc(){ if(this.av) this.av.setAcc(Core.s.acc.on); }
 };
@@ -197,7 +197,7 @@ const HUD={
 /* =============================================================================
    Vườn hoa & Thú cưng — kèm ƯU ĐÃI CHĂM SÓC (Giờ vàng • Chuỗi chăm sóc • Combo cả ngày)
    ============================================================================= */
-function winRow(list,map){ return `<div class="win-row">${Core.winState(list,map).map(w=>`<span class="win ${w.st}">${w.label} ${w.from}h–${w.to}h${w.st==='done'?' ✓':w.st==='now'?' • ĐANG MỞ':''}</span>`).join('')}${Date.now()<Core.s.force.until?'<span class="win now">Đang mở</span>':''}</div>`; }
+function winRow(list,map){ return `<div class="win-row">${Core.winState(list,map).map(w=>`<span class="win ${w.st}">${w.label} ${w.from}h–${w.to}h${w.st==='done'?' ✓':w.st==='now'?' • ĐANG MỞ':''}</span>`).join('')}</div>`; }
 function xpBar(xp,table,lv){ const cur=table[lv].xp, nxt=table[lv+1]; if(!nxt) return `${UI.bar(100)}<div class="muted">Đã đạt cấp tối đa!</div>`;
   return `${UI.bar((xp-cur)/(nxt.xp-cur)*100)}<div class="muted">${xp-cur}/${nxt.xp-cur} XP → <b>${nxt.name}</b></div>`; }
 function careOfferHTML(winList){
@@ -246,7 +246,7 @@ function openPets(){ const sh=UI.sheet({title:'Khu Thú Cưng',icon:'paw'});
   render(); sh.track(Core.on('change',render)); }
 
 function goShop(){ const s=Core.s;
-  if(s.screen.locked){ UI.toast('Khu giải trí đang khóa vì hết giờ màn hình. Làm 1 Quest để mở thêm 5 phút!'); Overlays.screen(true); return; }
+  if(s.block.mode==='lockdown' && s.screen.locked){ UI.toast('Khu giải trí đang khóa vì hết giới hạn hằng ngày. Làm 1 Quest để mở thêm 5 phút!'); Overlays.screen(true); return; }
   if(Core.isBedtime() && !s.night.broken){ Overlays.bed(true); return; }
   (async()=>{ await Lobby.leave(); Nav.go('fomo','',{tp:1}); })(); }
 
@@ -285,6 +285,11 @@ const Start={
     const lo=el.querySelector('[data-a=logout]'); if(lo) lo.onclick=()=>{ Cloud.signOut(); this.render(onStart); };
     const st=el.querySelector('[data-a=start]'); if(st) st.onclick=()=>{ const n=(el.querySelector('#stName').value||'').trim()||'Bạn Lừa'; Core.newGame(n,acc); if(Cloud.online) Cloud.push(); onStart(); };
     const ct=el.querySelector('[data-a=cont]'); if(ct) ct.onclick=()=>onStart();
-    const nw=el.querySelector('[data-a=new]'); if(nw) nw.onclick=()=>{ if(confirm('Bắt đầu lại từ đầu? Dữ liệu cục bộ sẽ bị xóa.')){ Store.clear(); Core.state=null; this.render(onStart); } };
+    const nw=el.querySelector('[data-a=new]'); if(nw) nw.onclick=()=>{ UI.confirm({
+      title:'Bắt đầu lại từ đầu?',
+      body:'Dữ liệu lưu trên thiết bị này sẽ bị xóa để tạo chú Lừa mới.',
+      okLabel:'Chơi mới', okCls:'rose',
+      onOk:()=>{ Store.clear(); Core.state=null; this.render(onStart); }
+    }); };
     App.show('start'); }
 };

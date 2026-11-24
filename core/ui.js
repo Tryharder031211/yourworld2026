@@ -41,6 +41,17 @@ const UI={
     w.innerHTML=`<div class="modal card ${cls}">${html}</div>`; this.app.appendChild(w);
     const api={el:w,box:w.querySelector('.modal'),close(){ w.remove(); onClose&&onClose(); }};
     if(dismiss) w.addEventListener('pointerdown',e=>{ if(e.target===w) api.close(); }); return api; },
+  confirm({title='Xác nhận',body='',okLabel='Xác nhận',cancelLabel='Để sau',okCls='rose',onOk}={}){
+    const m=this.modal(`<div class="row"><h3 class="grow txt-accent">${title}</h3><button class="x-btn" data-x>${sv(IP.x,16)}</button></div>
+      <p class="muted" style="margin:8px 0 12px">${body}</p>
+      <div class="row"><button class="btn grow" data-x>${cancelLabel}</button><button class="btn ${okCls} grow" data-ok>${okLabel}</button></div>`);
+    m.box.querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>m.close());
+    m.box.querySelector('[data-ok]').onclick=async()=>{
+      const btn=m.box.querySelector('[data-ok]'); btn.disabled=true;
+      try{ await (onOk&&onOk()); m.close(); }
+      catch(e){ btn.disabled=false; UI.toast('Lỗi: '+(e.message||e)); }
+    };
+    return m; },
   bills(fromEl,n=12){ const r=fromEl.getBoundingClientRect(); const [x,y]=this.rel(r.left+r.width/2,r.top+r.height/2);
     for(let i=0;i<n;i++){ const b=document.createElement('div'); b.className='bill-fly'; b.innerHTML=sv(IP.bill,34); b.style.cssText=`left:${x-17}px;top:${y-17}px`; this.app.appendChild(b);
       const dx=U.rand(-170,170), dy=U.rand(-320,-120);

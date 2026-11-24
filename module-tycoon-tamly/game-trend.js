@@ -64,7 +64,7 @@ class ShopSession {
     if(this.util<20) this.base-=1;
     if(this.spaceTotal>=100) this.base-=3;
     this.clamp(); this.emit('day');
-    if(this.day>=ShopSession.DAYS){ this.day=ShopSession.DAYS; this.end(); } else this.emit('change'); }
+    if(this.day>ShopSession.DAYS){ this.day=ShopSession.DAYS; this.end(); } else this.emit('change'); }
   end(){ if(this.ended) return; this.ended=true; this.cart=[]; this.emit('end'); }
   summary(){ const fomo=this.owned.filter(o=>o.type==='fomo'), need=this.owned.filter(o=>o.type==='need');
     const fomoSpent=fomo.reduce((a,o)=>a+o.price,0), needSpent=need.reduce((a,o)=>a+o.price,0);
@@ -86,7 +86,8 @@ const ShopUI={
   start(pid,mode){ const S=this.S=new ShopSession(pid); this.mode=mode; this.warn={};
     S.on('end',()=>this.showSummary()); S.on('change',()=>this.hud()); S.on('day',()=>this.hud());
     App.show('shopping'); this.render(); UI.toast(`Tháng mới bắt đầu! Ví: ${U.vnd(S.money)}`); },
-  abort(){ this.S=null; Market.unmount(); },
+  clearVoucher(){ if(this._vTimer){ clearInterval(this._vTimer); this._vTimer=null; } if(this._vModal){ this._vModal.close(); this._vModal=null; } },
+  abort(){ this.clearVoucher(); if(this._hudRo){ this._hudRo.disconnect(); this._hudRo=null; } this.S=null; Market.unmount(); },
   render(){ const S=this.S, p=S.p;
     this.el.innerHTML=`<div class="s-hud" id="sHud"><div class="row"><button class="icon-btn" style="width:34px;height:34px;border-radius:10px" data-a="exit">${sv(IP.back,20)}</button>
       <div class="grow" style="min-width:0"><b style="font-size:14px;line-height:1">${p.name}</b><div style="font-size:11px;opacity:.85">Ngày <b id="sDay">1</b>/30 • Tháng #${Core.s.shop.month}</div></div>
@@ -96,9 +97,27 @@ const ShopUI={
       <div class="row" style="margin-top:6px;gap:6px"><div class="seg dark grow"><button data-m="shopee">${'Sàn TMĐT'}</button><button data-m="market">Siêu Thị</button></div><button class="btn sm" data-a="clean">${sv(IP.broom,16)} Dọn</button><button class="btn sm rose" data-a="end">Chốt tháng</button></div></div>
       <div class="s-body" id="sBody"></div>`;
     this.el.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>this.setMode(b.dataset.m));
-    this.el.querySelector('[data-a=exit]').onclick=()=>{ if(confirm('Thoát giữa tháng? Tiến trình tháng này sẽ mất.')){ this.abort(); App.show('hub'); Hub.resize(); this.reviveHubDk(); } };
-    this.el.querySelector('[data-a=clean]').onclick=()=>{ const c=S.cleanerCost(); if(confirm(`Thuê người dọn phòng giá ${U.vnd(c)} (giảm 35% diện tích)?`)){ if(S.hireCleaner()) UI.toast('Phòng gọn gàng hơn rồi!'); else UI.toast('Không đủ tiền VNĐ'); } };
-    this.el.querySelector('[data-a=end]').onclick=()=>{ if(confirm('Chốt sổ cuối tháng ngay bây giờ?')) S.end(); };
+    this.el.querySelector('[data-a=exit]').onclick=()=>UI.confirm({
+      title:'Thoát giữa tháng?',
+      body:'Tiến trình mua sắm trong tháng này sẽ không được lưu.',
+      okLabel:'Thoát', okCls:'rose',
+      onOk:()=>{ this.abort(); App.show('hub'); Hub.resize(); this.reviveHubDk(); }
+    });
+    this.el.querySelector('[data-a=clean]').onclick=()=>{ const c=S.cleanerCost(); UI.confirm({
+      title:'Thuê người dọn phòng?',
+      body:`Chi phí <b>${U.vnd(c)}</b> để giảm 35% diện tích bừa bộn và +2 Hạnh phúc.`,
+      okLabel:`Dọn (${U.vnd(c)})`, okCls:'moss',
+      onOk:()=>{ if(S.hireCleaner()) UI.toast('Phòng gọn gàng hơn rồi!'); else UI.toast('Không đủ tiền VNĐ'); }
+    }); };
+    this.el.querySelector('[data-a=end]').onclick=()=>UI.confirm({
+      title:'Chốt sổ cuối tháng?',
+      body:'Kết thúc tháng ngay bây giờ và xem Hóa Đơn Thực Tế của bạn.',
+      okLabel:'Chốt tháng', okCls:'pri',
+      onOk:()=>{ if(this.S&&!this.S.ended) this.S.end(); }
+    });
+    const hudEl=this.el.querySelector('#sHud'), syncTop=()=>{ const b=document.getElementById('sBody'); if(b&&hudEl) b.style.top=hudEl.offsetHeight+'px'; };
+    if(this._hudRo) this._hudRo.disconnect();
+    this._hudRo=new ResizeObserver(syncTop); this._hudRo.observe(hudEl);
     this.setMode(this.mode); },
   reviveHubDk(){ Hub.dk.el.classList.remove('tp-out','tp-in'); },
   setMode(m){ this.mode=m; Market.unmount(); this.el.querySelectorAll('[data-m]').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
@@ -144,12 +163,13 @@ const ShopUI={
     sp.vT-=dt; sp.cT-=dt;
     if(sp.vT<=0){ sp.vT=U.rand(22,32); this.voucher(); }
     if(sp.cT<=0){ sp.cT=U.rand(6,10); this.crowd(); } },
-  voucher(){ const S=this.S, it=U.pick(S.p.items.filter(i=>i.type==='fomo')); let left=30;
-    const m=UI.modal(`<div class="center">${sv(IP.ticket,64)}<h2 class="txt-danger" style="font-size:24px">VOUCHER FREESHIP 0đ!</h2><p style="font-weight:700">Áp dụng cho <b>${it.name}</b> — hết hạn sau <b id="vLeft">00:30</b></p>
+  voucher(){ const S=this.S; if(!S||S.ended) return; const it=U.pick(S.p.items.filter(i=>i.type==='fomo')); let left=30;
+    this.clearVoucher();
+    const m=this._vModal=UI.modal(`<div class="center">${sv(IP.ticket,64)}<h2 class="txt-danger" style="font-size:24px">VOUCHER FREESHIP 0đ!</h2><p style="font-weight:700">Áp dụng cho <b>${it.name}</b> — hết hạn sau <b id="vLeft">00:30</b></p>
       <p class="muted">"Không mua bây giờ là mất cơ hội đó!"</p><div class="row" style="margin-top:10px"><button class="btn grow" data-a="no">Thôi, mình không cần</button><button class="btn rose grow" data-a="yes">Dùng ngay</button></div></div>`,{dismiss:false});
-    const iv=setInterval(()=>{ left--; const e=m.box.querySelector('#vLeft'); if(e) e.textContent='00:'+U.pad(Math.max(0,left)); if(left<=0){ clearInterval(iv); m.close(); } },1000);
-    m.box.querySelector('[data-a=no]').onclick=()=>{ clearInterval(iv); m.close(); S.calm(2); UI.toast('Tỉnh táo! Không bị voucher dắt mũi (+2 Hạnh phúc bền vững)'); };
-    m.box.querySelector('[data-a=yes]').onclick=()=>{ clearInterval(iv); m.close(); S.addToCart(it.id); this.openCart('Chốt đơn'); }; },
+    this._vTimer=setInterval(()=>{ left--; const e=m.box.querySelector('#vLeft'); if(e) e.textContent='00:'+U.pad(Math.max(0,left)); if(left<=0) this.clearVoucher(); },1000);
+    m.box.querySelector('[data-a=no]').onclick=()=>{ this.clearVoucher(); if(!this.S||this.S.ended) return; this.S.calm(2); UI.toast('Tỉnh táo! Không bị voucher dắt mũi (+2 Hạnh phúc bền vững)'); };
+    m.box.querySelector('[data-a=yes]').onclick=()=>{ this.clearVoucher(); if(!this.S||this.S.ended) return; this.S.addToCart(it.id); this.openCart('Chốt đơn'); }; },
   crowd(){ const body=document.getElementById('sBody'); if(!body) return; const f=U.pick(DATA.FRIENDS), b=document.createElement('div'); b.className='crowd';
     b.style.bottom=U.ri(70,260)+'px'; b.innerHTML=`<div style="width:30px;height:30px;flex:none">${friendFace(f,30)}</div><div class="bub">${U.pick(DATA.CROWD)}</div>`; body.appendChild(b);
     const t0=Date.now(); setTimeout(()=>{ b.remove(); if(this.S&&!this.S.ended&&this.mode==='shopee'&&(this.sp.lastBuy||0)<t0){ this.S.pressure(2); UI.float(`-2 ${sv(IP.heart,14)} áp lực đám đông`,120,UI.app.clientHeight-140,'#a5584c'); } },4200); },
@@ -166,7 +186,7 @@ const ShopUI={
   afterPay(r){ let msg=`Đã chốt đơn ${U.vnd(r.tot)}!`; if(r.fomo) msg+=` Dopamine tăng vọt... nhưng sẽ tụt rất nhanh.`; else if(r.need) msg+=' Đồ hữu ích — hạnh phúc sẽ tăng bền vững theo số lần dùng.';
     if(r.eatReserve) msg+=` ⚠ Bạn vừa tiêu vào ${this.S.p.reserveLabel}!`; UI.toast(msg); this.hud(); Market.refreshCart(); },
   /* ---------------- Tổng kết & Thanh lý cuối tháng ---------------- */
-  showSummary(demo){ const S=this.S; if(!S) return; const sum=S.summary(), p=S.p; this.lastSum=sum; Market.paused=true;
+  showSummary(){ const S=this.S; if(!S) return; this.clearVoucher(); document.querySelectorAll('.sheet-wrap').forEach(el=>el.remove()); const sum=S.summary(), p=S.p; this.lastSum=sum; Market.paused=true;
     const lines=[...sum.need,...sum.fomo].map(o=>`<div class="ln"><span>${o.name}<br>${o.type==='fomo'?'<span class="dusty">Bám bụi (Số lần sử dụng: 1 lần)</span>':`<small>Đã dùng: ${o.uses} lần ✓</small>`}</span><span>${U.vnd(o.price)}</span></div>`).join('')||'<div class="ln"><span>(Không mua món nào)</span><span>0đ</span></div>';
     const m=UI.modal(`<div class="receipt"><div class="center"><b style="font-size:17px">HÓA ĐƠN THỰC TẾ</b><br>REALITY RECEIPT • THÁNG #${Core.s.shop.month}<br>${p.name}<br>Ngân sách: ${U.vnd(p.budget)}</div><div class="dash"></div>${lines}<div class="dash"></div>
       <div class="ln"><b>Tổng đã chi</b><b>${U.vnd(sum.spent)}</b></div><div class="ln"><span>• Đồ thiết yếu</span><span>${U.vnd(sum.needSpent)}</span></div><div class="ln"><span>• Đồ theo trend/FOMO</span><span>${U.vnd(sum.fomoSpent)}</span></div>
@@ -176,15 +196,11 @@ const ShopUI={
       <div class="ln"><span>Mục tiêu tháng</span><span>${sum.reserveOk&&sum.goalsMet?'ĐẠT ✓':'CHƯA ĐẠT ✗'}</span></div></div>
       <div class="card ${sum.fomoCount?'tint-rose':'tint-active'}" style="margin-top:16px;padding:12px"><b style="font-size:15px">${sum.msg}</b>${sum.reserveOk?'':`<div class="muted txt-danger" style="margin-top:4px;font-weight:800">Bạn đã tiêu lẹm ${U.vnd(-sum.leftover)} vào ${p.reserveLabel}!</div>`}</div>
       <button class="btn pri big full" style="margin-top:12px" data-a="claim">${sv(IP.gem,24)} Nhận +${sum.gem} Gem & Về Nhà</button>`,{dismiss:false});
-    m.box.querySelector('[data-a=claim]').onclick=()=>{ m.close(); this.claim(sum,demo); }; },
-  async claim(sum,demo){ Core.finishShopping(sum); this.S=null;
+    m.box.querySelector('[data-a=claim]').onclick=()=>{ m.close(); this.claim(sum); }; },
+  async claim(sum){ Core.finishShopping(sum); if(this._hudRo){ this._hudRo.disconnect(); this._hudRo=null; } this.S=null;
     if(App.cur==='shopping' && this.mode==='market' && Market.dk){ await FX.teleport(Market.world,Market.mv.x,Market.mv.y,Market.dk,'out'); }
     else { App.show('hub'); Hub.resize(); this.reviveHubDk(); await FX.teleport(Hub.world,195,284,Hub.dk,'out'); }
-    Market.unmount(); Nav.go('home','',{tp:1}); },
-  demoMonthEnd(){ if(this.S && !this.S.ended){ this.S.end(); return; }
-    const S=this.S=new ShopSession('student'); this.mode='shopee';
-    for(const id of ['textbook','cooker','keyboard','blindbox','lemontea']) S.addToCart(id); S.checkout();
-    for(let i=0;i<29;i++) S.nextDay(); S.ended=true; this.showSummary(true); }
+    Market.unmount(); Nav.go('home','',{tp:1}); }
 };
 
 /* ---------------- Chế độ 2: Minigame Xe Đẩy Siêu Thị (Top-down Canvas + A*) ---------------- */

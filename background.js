@@ -134,7 +134,7 @@ async function evaluate() {
   const allow = allowedList(policy);
   const bed = isBedtime(h, policy) && policy.brokenNight !== day;
   const extra = policy.extra || 0;
-  const usedDaily = Math.max(u.totalMinutes || 0, policy.day === day ? (policy.usedFloor || 0) : 0);
+  const usedDaily = u.totalMinutes || 0;
   const leftDaily = policy.limit + extra - usedDaily;
   const dailyOut = leftDaily <= 0 || (policy.screenLocked && policy.day === day);
 
