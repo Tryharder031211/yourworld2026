@@ -1,0 +1,78 @@
+name: Build Desktop App (Electron PC)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_mac_linux:
+        description: 'Build thêm bản macOS (.dmg) và Linux (.AppImage)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install & Build Windows Portable + Setup EXE
+        working-directory: desktop
+        run: |
+          npm install
+          npm run build:win
+
+      - name: Upload Windows EXE artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-chill-windows-exe
+          path: desktop/dist/*.exe
+
+  build-macos:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mac_linux == true }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install & Build macOS DMG
+        working-directory: desktop
+        run: |
+          npm install
+          npm run build:mac
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-chill-macos-dmg
+          path: desktop/dist/*.dmg
+
+  build-linux:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mac_linux == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install & Build Linux AppImage
+        working-directory: desktop
+        run: |
+          npm install
+          npm run build:linux
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua-chill-linux-appimage
+          path: desktop/dist/*.AppImage
