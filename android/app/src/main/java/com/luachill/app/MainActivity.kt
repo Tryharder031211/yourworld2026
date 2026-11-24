@@ -1,23 +1,30 @@
 package com.luachill.app
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,10 +35,13 @@ class MainActivity : AppCompatActivity() {
         const val BASE_URL = "https://appassets.androidplatform.net/assets/www/"
         const val EXTRA_BLOCKED_APP = "blocked_app"
         const val EXTRA_BLOCK_REASON = "block_reason"
+        const val EXTRA_OPEN_TAB = "open_tab"
     }
 
     private lateinit var webView: WebView
     private var fileCb: ValueCallback<Array<Uri>>? = null
+    private var geoCb: GeolocationPermissions.Callback? = null
+    private var geoOrigin: String? = null
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val uris = WebChromeClient.FileChooserParams.parseResult(res.resultCode, res.data)
@@ -39,9 +49,23 @@ class MainActivity : AppCompatActivity() {
         fileCb = null
     }
 
+    private val permReq = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        val granted = res[Manifest.permission.ACCESS_FINE_LOCATION] == true || res[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        geoCb?.invoke(geoOrigin, granted, false)
+        geoCb = null
+        geoOrigin = null
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ReminderScheduler.ensureChannel(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permReq.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+        }
+
         webView = WebView(this)
         setContentView(webView)
 
@@ -49,11 +73,14 @@ class MainActivity : AppCompatActivity() {
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
+        CookieManager.getInstance().setAcceptCookie(true)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
+            setGeolocationEnabled(true)
             allowFileAccess = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             mediaPlaybackRequiresUserGesture = false
         }
 
@@ -92,6 +119,17 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+                val ok = ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (ok) {
+                    callback?.invoke(origin, true, false)
+                } else {
+                    geoOrigin = origin
+                    geoCb = callback
+                    permReq.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
+                }
+            }
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -101,6 +139,16 @@ class MainActivity : AppCompatActivity() {
         })
 
         handleIntent(intent, initial = true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Cập nhật ngay trạng thái 3 quyền hệ thống khi người dùng quay lại từ Cài đặt Android
+        if (::webView.isInitialized) {
+            webView.post {
+                webView.evaluateJavascript("window.__onAppResume && window.__onAppResume();", null)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -127,6 +175,12 @@ class MainActivity : AppCompatActivity() {
             val enc = URLEncoder.encode(blocked, "UTF-8")
             val tab = if (reason == "bed") "sleep" else "tasks"
             webView.loadUrl("${BASE_URL}module-suc-khoe/health.html?blocked=$enc&reason=$reason#$tab")
+            return
+        }
+
+        val openTab = intent?.getStringExtra(EXTRA_OPEN_TAB)
+        if (!openTab.isNullOrEmpty()) {
+            webView.loadUrl("${BASE_URL}module-suc-khoe/health.html#$openTab")
             return
         }
 
@@ -161,10 +215,11 @@ class MainActivity : AppCompatActivity() {
         fun getInstalledApps(): String {
             val pm = packageManager
             val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val exempt = PolicyStore.systemExemptPackages(this@MainActivity)
             val list = pm.queryIntentActivities(i, PackageManager.MATCH_ALL)
                 .map { ri -> ri.activityInfo.packageName to ri.loadLabel(pm).toString() }
                 .distinctBy { it.first }
-                .filter { (pkg, _) -> pkg !in PolicyStore.WHITELIST }
+                .filter { (pkg, _) -> pkg !in exempt }
                 .sortedBy { it.second.lowercase() }
             val arr = JSONArray()
             for ((pkg, name) in list) {
@@ -179,6 +234,7 @@ class MainActivity : AppCompatActivity() {
                 .put("usage", UsageTracker.hasPermission(this@MainActivity))
                 .put("accessibility", isAccessibilityEnabled())
                 .put("overlay", Settings.canDrawOverlays(this@MainActivity))
+                .put("notify", NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled())
                 .toString()
         }
 
@@ -189,6 +245,8 @@ class MainActivity : AppCompatActivity() {
                     "usage" -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
                     "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    "notify" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                     else -> Intent(Settings.ACTION_SETTINGS)
                 }
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -197,8 +255,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun showNotification(title: String, body: String) {
+            ReminderScheduler.showNotification(this@MainActivity, title, body, "timer", (System.currentTimeMillis() % 10000).toInt())
+        }
+
+        @JavascriptInterface
         fun openAuth(url: String) {
             runOnUiThread { openExternal(url) }
         }
+
+        @JavascriptInterface
+        fun getAppVersion(): String = "2.2.0"
     }
 }

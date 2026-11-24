@@ -30,8 +30,9 @@
 ├─ pwa.webmanifest & sw.js        # Hỗ trợ cài PWA trên Điện thoại & iPad
 ├─ manifest.json & background.js  # Chrome Extension MV3 chặn web động theo danh sách người dùng chọn
 ├─ backend/supabase.sql           # Schema Postgres, RLS bảo mật, chống spam & Realtime
-├─ android/                       # Dự án Android Kotlin native chặn app thật
-├─ .github/workflows/build-android.yml # Tự động build file Android .APK trên GitHub Actions
+├─ android/                       # Ứng dụng Android Kotlin Native (UsageStats, Accessibility, Draw-Over-Apps, AlarmManager)
+├─ desktop/                       # Ứng dụng PC Electron (System Tray, đo & chặn app 3 chế độ, màn hình khóa, OAuth PC)
+├─ .github/workflows/             # Tự động build Android .APK và PC Windows .EXE / macOS .DMG / Linux .AppImage
 ├─ DEPLOY.md                      # Hướng dẫn thiết lập Supabase, Google/Discord OAuth & Build APK
 ├─ assets/                        # CSS responsive, icon doodle SVG, chú lừa Voxel 3D, tranh nền
 ├─ core/                          # Engine, UI, Cloud (Supabase), Social online, Lobby, Settings, Boot

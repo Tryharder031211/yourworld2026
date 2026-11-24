@@ -11,8 +11,8 @@ android {
         applicationId = "com.luachill.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "2.2.0"
     }
 
     buildTypes {
@@ -29,6 +29,24 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+/* Tự động đồng bộ mã nguồn web Lừa Chill vào assets/www trước mỗi lần build (Android Studio & GitHub Actions) */
+val webRootDir = rootProject.file("..")
+val syncWebAssets by tasks.registering(Sync::class) {
+    onlyIf { webRootDir.resolve("index.html").exists() }
+    from(webRootDir) {
+        include("index.html", "config.js", "pwa.webmanifest", "sw.js")
+        include("assets/**")
+        include("core/**")
+        include("module-suc-khoe/**")
+        include("module-tycoon-tamly/**")
+    }
+    into(layout.projectDirectory.dir("src/main/assets/www"))
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(syncWebAssets)
 }
 
 dependencies {

@@ -52,7 +52,7 @@ alter table public.saves enable row level security;
 drop policy if exists "saves: của mình" on public.saves;
 create policy "saves: của mình" on public.saves for all to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
--- ---------- Bạn bè (theo dõi 1 chiều; 2 người thêm nhau = bạn bè) ----------
+-- ---------- Bạn bè & Lời mời kết bạn (1 chiều = đang chờ; 2 chiều = bạn bè chính thức) ----------
 create table if not exists public.friendships (
   user_id    uuid not null references public.profiles(id) on delete cascade,
   friend_id  uuid not null references public.profiles(id) on delete cascade,
@@ -66,7 +66,8 @@ create policy "friendships: xem liên quan" on public.friendships for select to 
 drop policy if exists "friendships: thêm của mình" on public.friendships;
 create policy "friendships: thêm của mình" on public.friendships for insert to authenticated with check (auth.uid() = user_id);
 drop policy if exists "friendships: xóa của mình" on public.friendships;
-create policy "friendships: xóa của mình" on public.friendships for delete to authenticated using (auth.uid() = user_id);
+drop policy if exists "friendships: xóa liên quan" on public.friendships;
+create policy "friendships: xóa liên quan" on public.friendships for delete to authenticated using (auth.uid() in (user_id, friend_id));
 
 -- ---------- Tin nhắn: phòng 'global' (cộng đồng) và 'dm:<uuid>:<uuid>' (riêng 2 người) ----------
 create table if not exists public.messages (
@@ -123,6 +124,18 @@ create table if not exists public.blocks (
 alter table public.blocks enable row level security;
 drop policy if exists "blocks: của mình" on public.blocks;
 create policy "blocks: của mình" on public.blocks for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Ngăn người đã bị chặn gửi lại lời mời kết bạn
+drop policy if exists "friendships: thêm của mình" on public.friendships;
+create policy "friendships: thêm của mình" on public.friendships for insert to authenticated
+  with check (
+    auth.uid() = user_id
+    and not exists (
+      select 1 from public.blocks b
+      where (b.user_id = friend_id and b.blocked_id = auth.uid())
+         or (b.user_id = auth.uid() and b.blocked_id = friend_id)
+    )
+  );
 
 -- ---------- Bật Realtime cho chat ----------
 do $$ begin

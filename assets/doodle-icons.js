@@ -114,5 +114,8 @@ Object.assign(IP,{
   ban:`<circle cx="20" cy="20" r="13" fill="${C.rbl}"/><path d="M11 11l18 18" stroke-width="3"/>`,
   copy:`<rect x="13" y="12" width="18" height="22" rx="3" fill="${C.bg}"/><path d="M13 28H9a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4"/>`,
   cloud:`<path d="M12 30h17a6 6 0 0 0 1-11.9A9 9 0 0 0 12.6 15 6.5 6.5 0 0 0 12 30z" fill="${C.mnl}"/>`,
-  logout:`<path d="M16 7H9a3 3 0 0 0-3 3v20a3 3 0 0 0 3 3h7"/><path d="M25 13l8 7-8 7M33 20H15" stroke-width="2.6"/>`
+  logout:`<path d="M16 7H9a3 3 0 0 0-3 3v20a3 3 0 0 0 3 3h7"/><path d="M25 13l8 7-8 7M33 20H15" stroke-width="2.6"/>`,
+  bell:`<path d="M20 6a9 9 0 0 0-9 9v7l-3 4h24l-3-4v-7a9 9 0 0 0-9-9z" fill="${C.yl}"/><path d="M17 30a3.2 3.2 0 0 0 6 0"/>`,
+  pin:`<path d="M20 35s10-10 10-18a10 10 0 1 0-20 0c0 8 10 18 10 18z" fill="${C.rb}"/><circle cx="20" cy="17" r="4" fill="${C.bg}"/>`,
+  layers:`<path d="M20 7l14 7-14 7-14-7z" fill="${C.mgl}"/><path d="M6 21l14 7 14-7M6 28l14 7 14-7"/>`
 });

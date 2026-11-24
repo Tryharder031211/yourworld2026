@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Nằm gọn trong vùng an toàn 66dp giữa icon để không bị cắt khi bo tròn -->
+    <path android:fillColor="#839958" android:pathData="M24,30A10,10 0 0,1 34,20h40A10,10 0 0,1 84,30v48A10,10 0 0,1 74,88h-40A10,10 0 0,1 24,78z" />
+    <path android:fillColor="#B8B0A6" android:strokeColor="#0A3323" android:strokeWidth="2.6" android:pathData="M38,44 L33,24 L46,38 Z M70,44 L75,24 L62,38 Z" />
+    <path android:fillColor="#B8B0A6" android:strokeColor="#0A3323" android:strokeWidth="2.6" android:pathData="M35,39 h38 a8,8 0 0,1 8,8 v20 a8,8 0 0,1 -8,8 h-38 a8,8 0 0,1 -8,-8 v-20 a8,8 0 0,1 8,-8 z" />
+    <path android:fillColor="#F7F4D5" android:strokeColor="#0A3323" android:strokeWidth="2.6" android:pathData="M38,59 h32 a6,6 0 0,1 6,6 v9 a8,8 0 0,1 -8,8 h-28 a8,8 0 0,1 -8,-8 v-9 a6,6 0 0,1 6,-6 z" />
+    <path android:fillColor="#0A3323" android:pathData="M45,51 a2.8,2.8 0 1,0 0.1,0 z M63,51 a2.8,2.8 0 1,0 0.1,0 z" />
+    <path android:fillColor="#D3968C" android:strokeColor="#0A3323" android:strokeWidth="2.5" android:pathData="M46,71 q8,5 16,0" />
+</vector>

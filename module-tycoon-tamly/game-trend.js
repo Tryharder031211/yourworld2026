@@ -145,7 +145,7 @@ const ShopUI={
     if(sp.vT<=0){ sp.vT=U.rand(22,32); this.voucher(); }
     if(sp.cT<=0){ sp.cT=U.rand(6,10); this.crowd(); } },
   voucher(){ const S=this.S, it=U.pick(S.p.items.filter(i=>i.type==='fomo')); let left=30;
-    const m=UI.modal(`<div class="center">${sv(IP.ticket,64)}<h2 style="color:#a5584c;font-size:24px">VOUCHER FREESHIP 0đ!</h2><p style="font-weight:700">Áp dụng cho <b>${it.name}</b> — hết hạn sau <b id="vLeft">00:30</b></p>
+    const m=UI.modal(`<div class="center">${sv(IP.ticket,64)}<h2 class="txt-danger" style="font-size:24px">VOUCHER FREESHIP 0đ!</h2><p style="font-weight:700">Áp dụng cho <b>${it.name}</b> — hết hạn sau <b id="vLeft">00:30</b></p>
       <p class="muted">"Không mua bây giờ là mất cơ hội đó!"</p><div class="row" style="margin-top:10px"><button class="btn grow" data-a="no">Thôi, mình không cần</button><button class="btn rose grow" data-a="yes">Dùng ngay</button></div></div>`,{dismiss:false});
     const iv=setInterval(()=>{ left--; const e=m.box.querySelector('#vLeft'); if(e) e.textContent='00:'+U.pad(Math.max(0,left)); if(left<=0){ clearInterval(iv); m.close(); } },1000);
     m.box.querySelector('[data-a=no]').onclick=()=>{ clearInterval(iv); m.close(); S.calm(2); UI.toast('Tỉnh táo! Không bị voucher dắt mũi (+2 Hạnh phúc bền vững)'); };
@@ -157,7 +157,7 @@ const ShopUI={
     const render=()=>{ const tot=S.cartTotal(), after=S.money-tot;
       sh.body.innerHTML=S.cart.length?S.cart.map(c=>`<div class="li card">${sv(IP[c.id],40)}<div class="grow"><b>${c.name}</b><div><span class="price" style="font-size:14px">${U.vnd(c.price)}</span>${c.flash?' <span class="tag rose">FLASH</span>':''}</div></div><button class="x-btn" data-rm="${c.uid}" style="width:28px;height:28px">${sv(IP.x,13)}</button></div>`).join('')+
         `<div class="card" style="padding:10px;margin-top:4px"><div class="row"><b class="grow">Tổng thanh toán</b><b class="price">${U.vnd(tot)}</b></div><div class="row"><span class="grow muted">Ví sau khi trả</span><b>${U.vnd(after)}</b></div>
-        ${after<S.p.reserve?`<div class="muted" style="color:#a5584c;font-weight:800;margin-top:4px">⚠ Đơn này sẽ tiêu lẹm vào ${S.p.reserveLabel}!</div>`:''}</div>
+        ${after<S.p.reserve?`<div class="muted txt-danger" style="font-weight:800;margin-top:4px">⚠ Đơn này sẽ tiêu lẹm vào ${S.p.reserveLabel}!</div>`:''}</div>
         <button class="btn pri big full" style="margin-top:10px" id="payBtn">${sv(IP.bill,26)} ${cta} • ${U.vnd(tot)}</button>`
         :`<div class="center" style="padding:20px">${sv(IP.cart,60)}<p class="muted">Giỏ hàng trống. Không mua gì cũng là một lựa chọn tỉnh thức!</p></div>`;
       sh.body.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{ S.removeFromCart(b.dataset.rm); render(); });
@@ -174,7 +174,7 @@ const ShopUI={
       <div class="ln"><span>Giữ cho ${p.reserveLabel}</span><span>-${U.vnd(p.reserve)}</span></div><div class="ln"><b>${sum.reserveOk?'Còn dư':'THIẾU HỤT'}</b><b>${U.vnd(sum.leftover)}</b></div><div class="dash"></div>
       <div class="ln"><span>Hữu dụng / Hạnh phúc / Diện tích</span><span>${sum.util} / ${sum.happy} / ${sum.space}%</span></div>
       <div class="ln"><span>Mục tiêu tháng</span><span>${sum.reserveOk&&sum.goalsMet?'ĐẠT ✓':'CHƯA ĐẠT ✗'}</span></div></div>
-      <div class="card" style="margin-top:16px;padding:12px;background:${sum.fomoCount?'#f3e0dc':'#e1e9c9'}"><b style="font-size:15px">${sum.msg}</b>${sum.reserveOk?'':`<div class="muted" style="margin-top:4px;color:#a5584c;font-weight:800">Bạn đã tiêu lẹm ${U.vnd(-sum.leftover)} vào ${p.reserveLabel}!</div>`}</div>
+      <div class="card ${sum.fomoCount?'tint-rose':'tint-active'}" style="margin-top:16px;padding:12px"><b style="font-size:15px">${sum.msg}</b>${sum.reserveOk?'':`<div class="muted txt-danger" style="margin-top:4px;font-weight:800">Bạn đã tiêu lẹm ${U.vnd(-sum.leftover)} vào ${p.reserveLabel}!</div>`}</div>
       <button class="btn pri big full" style="margin-top:12px" data-a="claim">${sv(IP.gem,24)} Nhận +${sum.gem} Gem & Về Nhà</button>`,{dismiss:false});
     m.box.querySelector('[data-a=claim]').onclick=()=>{ m.close(); this.claim(sum,demo); }; },
   async claim(sum,demo){ Core.finishShopping(sum); this.S=null;

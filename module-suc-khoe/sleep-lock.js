@@ -1,6 +1,7 @@
 /* =============================================================================
    module-suc-khoe/sleep-lock.js — Khóa giờ ngủ 8 tiếng (người dùng chọn giờ ngủ,
-   giờ dậy = +8h), điểm danh trong cửa sổ 8 tiếng sau khi dậy, và Màn hình Khóa OS.
+   giờ dậy = +8h), điểm danh trong cửa sổ 8 tiếng sau khi dậy, và Màn hình Khóa OS
+   có nút truy cập trực tiếp Bảng tùy chỉnh thời gian sử dụng.
    ============================================================================= */
 'use strict';
 
@@ -17,7 +18,7 @@ const SleepLock={
     const draw=()=>{ const s=Core.s, inBed=Core.isBedtime(), m=Core.minsToBed();
       const wake=U.hToHm(U.hmToH(bed)+DATA.SLEEP_HOURS), closeAt=this.winClose(s.sleep.wake);
       const doneToday=s.checkin.last===s.day, can=Core.canCheckIn(), pv=can?Core.checkInPreview():null;
-      el.innerHTML=`<div class="card h-hero" style="background:${inBed?'#cfe0e3':C.bg}">${sv(IP.bedtime,44)}
+      el.innerHTML=`<div class="card h-hero ${inBed?'tint-teal':''}">${sv(IP.bedtime,44)}
           <div class="grow"><b style="font-size:16px">${inBed?(s.night.broken?'Đang thức khuya quá giờ ngủ!':'Đang trong giờ ngủ 🌙'):`Còn ${Math.floor(m/60)}h${U.pad(m%60)} đến giờ ngủ`}</b>
             <div class="muted">Ngủ đủ ${DATA.SLEEP_HOURS} tiếng: <b>${s.sleep.bed} → ${s.sleep.wake}</b> • Streak ngủ ngon <b>${s.sleep.streak}</b> ngày</div></div></div>
 
@@ -30,18 +31,18 @@ const SleepLock={
               <span class="tag mid">Điểm danh: ${wake} → ${this.winClose(wake)}</span>
             </div>
             <button class="btn pri full" data-a="save" ${bed===s.sleep.bed?'disabled':''}>Lưu giờ ngủ (${bed} → ${wake})</button>
-            <p class="muted" style="margin-top:6px">Khóa các app bạn đã chọn trong 8 tiếng ngủ. Không thể đổi lịch khi đang trong giờ khóa.</p>
+            <p class="muted" style="margin-top:6px">Khóa các app theo chế độ đang chọn trong 8 tiếng ngủ. Không thể đổi lịch khi đang trong giờ khóa.</p>
           </div>
 
           <div class="card" style="padding:12px">
             <div class="row"><b class="grow">${sv(IP.calendar,18)} Điểm danh (khung 8 tiếng)</b><span class="tag">${sv(IP.fire,12)} ${s.checkin.streak} ngày</span></div>
             <div class="muted" style="margin-top:3px">Mở từ <b>${s.sleep.wake}</b> đến <b>${closeAt}</b> • Dậy trong 60' đầu nhận thêm <b>+15 Gem</b></div>
             ${this.ciRow()}
-            ${doneToday?`<p class="center" style="font-weight:800;color:${C.mn};margin-top:6px">Đã điểm danh hôm nay ✓ Hẹn gặp lại sáng mai!</p>`
+            ${doneToday?`<p class="center txt-accent" style="font-weight:800;margin-top:6px">Đã điểm danh hôm nay ✓ Hẹn gặp lại sáng mai!</p>`
               :can?`${this.ciParts(pv)}
                 <div class="muted center" style="margin-top:6px">Còn <b>${this.leftText(pv.leftH)}</b> để điểm danh hôm nay</div>
                 <button class="btn rose full big" style="margin-top:8px" data-a="ci">${sv(IP.calendar,22)} Điểm danh +${pv.gem} Gem</button>`
-              :`<div class="card center" style="padding:10px;background:#efe9cc;margin-top:6px">
+              :`<div class="card center tint-cream" style="padding:10px;margin-top:6px">
                   <b>${inBed?'Đang giờ ngủ — sáng mai nhớ điểm danh nhé!':'Đã qua khung điểm danh 8 tiếng hôm nay'}</b>
                   <div class="muted">Khung hợp lệ: ${s.sleep.wake} → ${closeAt} (tối đa ${DATA.CHECKIN_WINDOW} tiếng sau khi dậy)</div>
                 </div>`}
@@ -51,7 +52,7 @@ const SleepLock={
         <div class="card" style="padding:12px;margin-top:10px"><b>Giấc ngủ 7 đêm qua</b>
           <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">${(s.sleep.hist.slice(-7).length?s.sleep.hist.slice(-7):[]).map(h=>`<div class="night-dot" style="background:${h.q==='good'?C.mg:C.rb}" title="${h.day}">${sv(IP[h.q==='good'?'moon':'bolt'],14)}</div>`).join('')||'<span class="muted">Chưa có dữ liệu — tối nay bắt đầu nhé!</span>'}</div></div>
 
-        <div class="card" style="padding:12px;margin-top:10px;background:#dfe9ea"><b>Whitelist trong giờ ngủ</b>
+        <div class="card tint-teal" style="padding:12px;margin-top:10px"><b>Whitelist trong giờ ngủ</b>
           <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:10px">
             <div class="row" data-wl="zalo" style="cursor:pointer">${appIcon('zalo')}<b style="font-size:13px">Zalo Công việc</b></div>
             <div class="row" data-wl="call" style="cursor:pointer">${appIcon('call')}<b style="font-size:13px">Cuộc gọi khẩn cấp</b></div>
@@ -66,28 +67,46 @@ const SleepLock={
 };
 
 function lockedBadgesHTML(){
-  const b=Core.s.block;
-  if(Bridge.android && b.android.length){
-    return b.android.slice(0,5).map(a=>`<div class="os-app locked"><div class="app-ic" style="background:${C.mn}">${sv(IP.shield,28)}<span class="lk">${sv(IP.lock,20)}</span></div><span>${U.esc((a.name||a.pkg||a).slice(0,12))}</span></div>`).join('');
+  const b=Core.s.block, mode=b.mode||'apps';
+  if(mode==='lockdown'){
+    return `<div class="os-app locked"><div class="app-ic" style="background:${C.mn}">${sv(IP.shield,28)}<span class="lk">${sv(IP.lock,20)}</span></div><span>Toàn bộ app</span></div>`;
   }
-  const picked=DATA.WEB_APPS.filter(a=>b.web.includes(a.id)).slice(0,5);
+  const fKey=Bridge.electron?'pc':'android';
+  if(Bridge.nativeApps){
+    const arr=mode==='groups'?(b.groups||[]).flatMap(g=>g[fKey]||[]):(b[fKey]||[]);
+    if(arr.length) return arr.slice(0,5).map(a=>`<div class="os-app locked"><div class="app-ic" style="background:${C.mn}">${sv(IP.shield,28)}<span class="lk">${sv(IP.lock,20)}</span></div><span>${U.esc((a.name||a.pkg||a).slice(0,12))}</span></div>`).join('');
+  }
+  const webIds=mode==='groups'?[...new Set((b.groups||[]).flatMap(g=>g.web||[]))]:(b.web||[]);
+  const picked=DATA.WEB_APPS.filter(a=>webIds.includes(a.id)).slice(0,5);
   if(!picked.length) return ['tiktok','fb','ig','yt','game'].map(k=>`<div class="os-app locked">${appIcon(k,true)}<span>${APPS[k].n}</span></div>`).join('');
   return picked.map(a=>`<div class="os-app locked">${APPS[a.icon]?appIcon(a.icon,true):`<div class="app-ic" style="background:${C.mn}">${sv(IP[a.icon]||IP.shield,28)}<span class="lk">${sv(IP.lock,20)}</span></div>`}<span>${a.name}</span></div>`).join('');
 }
 
 const Overlays={
-  /* Màn hình khóa OS (hết giờ màn hình). info.site: app/site vừa bị chặn */
-  screen(on,info={}){ const o=document.getElementById('ovScreen'); if(!on){ o.classList.remove('on'); return; } const s=Core.s;
-    o.innerHTML=`<div class="os-bar"><span>${U.hm(Core.now())}</span><span class="row" style="gap:6px">LừaOS • Bảo vệ<button class="icon-btn" data-a="set" style="width:30px;height:30px;border-radius:9px" title="Cài đặt">${sv(IP.gear,18)}</button></span></div>
+  /* Màn hình khóa OS (hết giờ màn hình) — hiển thị đúng cơ chế khóa của chế độ đang bật */
+  screen(on,info={}){ const o=document.getElementById('ovScreen'); if(!on){ o.classList.remove('on'); return; } const s=Core.s, mode=info.mode||s.block.mode||'apps';
+    const subMsg=mode==='lockdown'
+      ?`Bạn đã dùng hết <b>${Math.floor((s.screen.limit+(s.screen.extra||0))/60)}h${U.pad((s.screen.limit+(s.screen.extra||0))%60)}</b> giới hạn hằng ngày • Chế độ <b>Khóa toàn bộ hằng ngày</b> (chỉ mở 3 app khẩn cấp).`
+      :mode==='groups'
+      ?`${info.site?`<b>${U.esc(info.site)}</b> đã chạm giới hạn nhóm`:'Một nhóm ứng dụng đã hết quỹ giờ'}${info.limit?` (${info.limit}p)`:''}. Các nhóm khác vẫn hoạt động bình thường.`
+      :`${info.site?`<b>${U.esc(info.site)}</b> đã chạm giới hạn riêng`:'Ứng dụng đã chạm giới hạn riêng'}${info.limit?` (${info.limit}p)`:''}. Các ứng dụng khác vẫn hoạt động bình thường.`;
+    o.innerHTML=`<div class="os-bar"><span>${U.hm(Core.now())}</span><span class="row" style="gap:6px">LừaOS • Bảo vệ<button class="icon-btn" data-a="usage" style="width:30px;height:30px;border-radius:9px" title="Tùy chỉnh thời gian sử dụng">${sv(IP.clock,18)}</button><button class="icon-btn" data-a="set" style="width:30px;height:30px;border-radius:9px" title="Cài đặt">${sv(IP.gear,18)}</button></span></div>
       <div class="ov-inner">
-        <div class="center" style="margin-top:16px"><div style="display:inline-grid;place-items:center;width:84px;height:84px;border-radius:50%;background:${C.bg};border:3px solid ${C.rb};box-shadow:0 0 24px #D3968C88">${sv(IP.lock,52)}</div>
-          <h2 style="font-size:24px;margin-top:8px">${info.site?U.esc(info.site)+' đã bị khóa!':'Hết giờ màn hình hôm nay!'}</h2>
-          <p style="opacity:.88;font-weight:600">Bạn đã dùng hết ${Math.floor(s.screen.limit/60)}h${U.pad(s.screen.limit%60)} cho các ứng dụng đã chọn. Hãy nghỉ mắt & thư giãn nhé.</p></div>
-        <div class="os-grid" style="margin:18px 0">${lockedBadgesHTML()}${['zalo','call'].map(k=>`<div class="os-app wl" data-wl="${k}">${appIcon(k)}<span>${APPS[k].n}</span></div>`).join('')}</div>
-        <div class="card" style="color:${C.dg};padding:12px"><b style="font-size:15px">Muốn thêm +5 phút & +10 Gem?</b><p class="muted">Hoàn thành 1 Quest đời thực (kèm ảnh xác nhận) để mở khóa thêm 5 phút.</p><button class="btn pri full" data-a="quest" style="margin-top:8px">${sv(IP.quest,20)} Làm 1 Quest đời thực</button></div>
-        <button class="btn ghost full" style="color:${C.bg};border-color:${C.bg};margin-top:12px" data-a="close">Quay lại chăm vườn (app lành mạnh)</button>
+        <div class="center" style="margin-top:12px"><div style="display:inline-grid;place-items:center;width:82px;height:82px;border-radius:50%;background:#F7F4D5;border:3px solid ${C.rb};box-shadow:0 0 24px #D3968C88">${sv(IP.lock,50)}</div>
+          <h2 style="font-size:24px;margin-top:8px">${info.site?U.esc(info.site)+' đã bị khóa!':mode==='lockdown'?'Hết giới hạn hằng ngày!':'Đã chạm giới hạn sử dụng!'}</h2>
+          <p style="opacity:.9;font-weight:600">${subMsg}</p></div>
+        <div class="os-grid" style="margin:14px 0">${lockedBadgesHTML()}${['zalo','call'].map(k=>`<div class="os-app wl" data-wl="${k}">${appIcon(k)}<span>${APPS[k].n}</span></div>`).join('')}</div>
+        <div class="card" style="padding:12px;margin-bottom:10px">
+          <div class="row" style="margin-bottom:6px">${sv(IP.clock,20)}<b class="grow" style="font-size:14.5px">Tùy chỉnh thời gian sử dụng & Chế độ khóa</b></div>
+          <p class="muted">Đang bật: <b>${Core.blockModeLabel(mode)}</b>. Bạn có thể chuyển sang chế độ khác hoặc điều chỉnh giới hạn riêng của từng chế độ.</p>
+          <button class="btn moss full" data-a="usage" style="margin-top:8px">${sv(IP.clock,18)} Mở Bảng tùy chỉnh thời gian</button>
+        </div>
+        <div class="card" style="padding:12px"><b style="font-size:15px">Muốn thêm +5 phút & +10 Gem?</b><p class="muted">Hoàn thành 1 Quest đời thực (kèm ảnh xác nhận) để nhận thêm 5 phút cho chế độ đang bật.</p><button class="btn pri full" data-a="quest" style="margin-top:8px">${sv(IP.quest,20)} Làm 1 Quest đời thực</button></div>
+        <button class="btn ghost full" style="color:#F7F4D5;border-color:#F7F4D5;margin-top:10px" data-a="close">Quay lại chăm vườn (app lành mạnh)</button>
       </div>`;
-    o.classList.add('on'); o.querySelector('[data-a=set]').onclick=()=>openSettings();
+    o.classList.add('on');
+    o.querySelector('[data-a=set]').onclick=()=>openSettings();
+    o.querySelectorAll('[data-a=usage]').forEach(b=>b.onclick=()=>openUsageSettings('mode'));
     o.querySelector('[data-a=quest]').onclick=()=>openQuests();
     o.querySelector('[data-a=close]').onclick=()=>{ o.classList.remove('on'); if(document.body.dataset.page!=='index') Nav.go('home'); };
     o.querySelectorAll('[data-wl]').forEach(e=>e.onclick=()=>this.whitelist(e.dataset.wl)); },
@@ -97,21 +116,26 @@ const Overlays={
     m.box.querySelectorAll('[data-call]').forEach(b=>b.onclick=()=>{ if(Bridge.android) location.href='tel:'+b.dataset.call; else UI.toast(`Số khẩn cấp: ${b.dataset.call}`); }); },
 
   bed(on){ const o=document.getElementById('ovBed'); if(!on){ o.classList.remove('on'); return; } const s=Core.s, slept=s.night.slept;
-    o.innerHTML=`<div class="os-bar"><span>${U.hm(Core.now())}</span><span class="row" style="gap:6px">${sv(IP.moon,14)} Chế độ Ngủ<button class="icon-btn" data-a="set" style="width:30px;height:30px;border-radius:9px" title="Cài đặt">${sv(IP.gear,18)}</button></span></div>
+    o.innerHTML=`<div class="os-bar"><span>${U.hm(Core.now())}</span><span class="row" style="gap:6px">${sv(IP.moon,14)} Chế độ Ngủ<button class="icon-btn" data-a="usage" style="width:30px;height:30px;border-radius:9px" title="Tùy chỉnh thời gian sử dụng">${sv(IP.clock,18)}</button><button class="icon-btn" data-a="set" style="width:30px;height:30px;border-radius:9px" title="Cài đặt">${sv(IP.gear,18)}</button></span></div>
       <div class="ov-inner center">
-        <div class="moon" style="margin-top:6px">${sv(IP.moon,56)}</div>
-        <div style="font-size:48px;font-weight:800;line-height:1" id="bedTime">${U.hm(Core.now())}</div>
+        <div class="moon" style="margin-top:6px">${sv(IP.moon,54)}</div>
+        <div style="font-size:46px;font-weight:800;line-height:1" id="bedTime">${U.hm(Core.now())}</div>
         <h2 style="font-size:21px;margin-top:4px">${slept?'Chúc ngủ ngon, '+U.esc(s.name)+'!':'Đến giờ ngủ rồi, '+U.esc(s.name)+' ơi!'}</h2>
-        <p style="opacity:.86;font-weight:600">${slept?`Ngủ đủ 8 tiếng! Từ ${s.sleep.wake} đến ${SleepLock.winClose(s.sleep.wake)} nhớ vào <b>Điểm danh</b> nhận Gem nhé!`:`Giờ ngủ đã chọn: <b>${s.sleep.bed}</b>. Khóa các app giải trí đến <b>${s.sleep.wake}</b>.`}</p>
-        <div id="bedDk" style="position:relative;height:118px;width:200px;margin:0 auto"></div>
+        <p style="opacity:.88;font-weight:600">${slept?`Ngủ đủ 8 tiếng! Từ ${s.sleep.wake} đến ${SleepLock.winClose(s.sleep.wake)} nhớ vào <b>Điểm danh</b> nhận Gem nhé!`:`Giờ ngủ đã chọn: <b>${s.sleep.bed}</b>. Khóa theo chế độ <b>${Core.blockModeLabel()}</b> đến <b>${s.sleep.wake}</b>.`}</p>
+        <div id="bedDk" style="position:relative;height:112px;width:200px;margin:0 auto"></div>
         <div style="font-size:11px;font-weight:800;opacity:.8;letter-spacing:.5px">WHITELIST</div>
         <div class="row" style="justify-content:center;gap:24px;margin:6px 0 12px">${['zalo','call'].map(k=>`<div class="os-app wl" data-wl="${k}" style="cursor:pointer">${appIcon(k)}<span>${APPS[k].n}</span></div>`).join('')}</div>
-        <div class="col" style="gap:10px;margin-top:6px">${slept?`<p class="muted" style="color:#b9d3d6">Chế độ ngủ đang bật. Chạm cài đặt nếu cần mở công cụ kiểm thử.</p>`
-          :`<button class="btn moss big full" data-a="sleep">${sv(IP.moon,24)} Đi ngủ (Tắt máy)</button>
-            <button class="btn full hold-btn" data-a="break" style="background:#ffffff22;color:${C.bg};border-color:${C.bg}"><i></i><span>Giữ 2 giây để phá khóa (thức khuya)</span></button>`}</div>
+        <div class="col" style="gap:10px;margin-top:6px">
+          <button class="btn full" data-a="usage" style="background:rgba(247,244,213,.16);color:#F7F4D5;border-color:#F7F4D5">${sv(IP.clock,18)} Bảng tùy chỉnh thời gian & Đồng hồ</button>
+          ${slept?`<p class="muted" style="color:#b9d3d6">Chế độ ngủ đang bật. Chạm nút trên nếu cần xem bảng thời gian hoặc cài đặt.</p>`
+            :`<button class="btn moss big full" data-a="sleep">${sv(IP.moon,24)} Đi ngủ (Tắt máy)</button>
+              <button class="btn full hold-btn" data-a="break" style="background:#ffffff22;color:#F7F4D5;border-color:#F7F4D5"><i></i><span>Giữ 2 giây để phá khóa (thức khuya)</span></button>`}
+        </div>
       </div>`;
-    o.classList.add('on'); o.querySelector('[data-a=set]').onclick=()=>openSettings();
-    const dk=new Donkey({scale:1.28,tilt:-16,yaw:20,mood:slept?'sleep':'tired',acc:Core.s.acc.on}); dk.pos(100,106); o.querySelector('#bedDk').appendChild(dk.el);
+    o.classList.add('on');
+    o.querySelector('[data-a=set]').onclick=()=>openSettings();
+    o.querySelectorAll('[data-a=usage]').forEach(b=>b.onclick=()=>openUsageSettings('limit'));
+    const dk=new Donkey({scale:1.25,tilt:-16,yaw:20,mood:slept?'sleep':'tired',acc:Core.s.acc.on}); dk.pos(100,102); o.querySelector('#bedDk').appendChild(dk.el);
     o.querySelectorAll('[data-wl]').forEach(e=>e.onclick=()=>this.whitelist(e.dataset.wl));
     const sl=o.querySelector('[data-a=sleep]'); if(sl) sl.onclick=()=>{ Core.goSleep(); this.bed(true); };
     const br=o.querySelector('[data-a=break]'); if(br){ let t=null, k=0; const bar=br.querySelector('i');
@@ -125,7 +149,7 @@ const Overlays={
     const q=pm?pm.q:(s.sleep.lastDay===s.day?s.sleep.last:null), good=q!=='bad';
     const draw=()=>{ const can=Core.canCheckIn(), pv=can?Core.checkInPreview():null;
       o.innerHTML=`<div class="morning-card card ${good?'good':'bad'}">${good?'<div class="sun-rays"></div>':''}
-        <div style="position:relative">${good?sv(IP.sunrise,42):''}<h2 style="color:${C.mn};font-size:24px">${q==='bad'?'Ôi... ngáp ngắn ngáp dài':'Chào buổi sáng!'}</h2>
+        <div style="position:relative">${good?sv(IP.sunrise,42):''}<h2 class="txt-accent" style="font-size:24px">${q==='bad'?'Ôi... ngáp ngắn ngáp dài':'Chào buổi sáng!'}</h2>
         <p style="font-weight:700">${q==='good'?`<b>Giấc ngủ NGON</b> — bạn đã ngủ đủ ${DATA.SLEEP_HOURS} tiếng từ ${s.sleep.bed}`:q==='bad'?`<b>Giấc ngủ KHÔNG NGON</b> — thức khuya quá ${s.sleep.bed}`:`Điểm danh trong ${DATA.CHECKIN_WINDOW} tiếng (${s.sleep.wake} → ${SleepLock.winClose(s.sleep.wake)}) để nhận Gem!`}</p>
         <div id="mDk" style="position:relative;height:122px"></div>
         ${q==='good'?`<div class="row" style="justify-content:center;gap:6px;flex-wrap:wrap"><span class="tag moss">${sv(IP.bolt,12)} Năng lượng 100%</span><span class="tag moss">+20% Gem Quest</span><span class="tag">${sv(IP.fire,12)} Ngủ ngon ${s.sleep.streak} ngày</span></div>`

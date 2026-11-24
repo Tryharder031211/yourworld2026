@@ -7,7 +7,7 @@
 const Lobby={
   OBJ:{
     home:{x:122,y:272,lx:112,ly:200,r:62,open:()=>Nav.go('tycoon')},
-    clock:{x:196,y:280,lx:196,ly:250,r:24,open:()=>Nav.go('health','#timer')},
+    clock:{x:196,y:280,lx:196,ly:250,r:24,open:()=>openUsageSettings('limit')},
     garden:{x:175,y:418,lx:175,ly:372,r:62,open:()=>openGarden()},
     pets:{x:331,y:426,lx:331,ly:392,r:30,open:()=>openPets()},
     shop:{x:322,y:134,lx:334,ly:62,r:36,open:()=>goShop()}
@@ -19,7 +19,8 @@ const Lobby={
       if(o.it) e.dataset.interact=o.it; e.innerHTML=html; w.appendChild(e); return e; };
     add(SCENE.tree(),226,166); add(SCENE.tree('#7a9150'),34,322); add(SCENE.tree(),362,488); add(SCENE.tree('#7a9150'),30,548); add(SCENE.tree(),248,590);
     add(SCENE.bush,60,446); add(SCENE.bush,300,456); add(SCENE.bush,200,520);
-    this.houseEl=add(SCENE.house,112,258,{it:'home'});
+    this.houseId_=Core.s.decor.house||'mushroom';
+    this.houseEl=add(SCENE.houseOf(this.houseId_),112,258,{it:'home'});
     this.clockEl=add(SCENE.clock,196,262,{it:'clock'});
     this.stage_=Core.gardenStage(); this.gardenEl=add(SCENE.garden(this.stage_),175,398,{it:'garden',cls:'garden'});
     add(SCENE.penBack,272,236,{abs:1,z:240,it:'pets'});
@@ -70,6 +71,7 @@ const Lobby={
   update(dt){ if(this.busy) return; const m=this.mover; m.update(dt); this.donkey.pos(m.x,m.y); this.donkey.setYaw(m.yaw); this.donkey.setWalk(m.moving); },
   refresh(){ const s=Core.s; if(!s||!this.world) return;
     this.world.classList.toggle('night',Core.isNight());
+    const hid=s.decor.house||'mushroom'; if(hid!==this.houseId_){ this.houseId_=hid; this.houseEl.innerHTML=SCENE.houseOf(hid); }
     const st=Core.gardenStage(); if(st!==this.stage_ && !this.fxBusy){ this.stage_=st; this.gardenEl.innerHTML=SCENE.garden(st); }
     const g=this.gardenEl; g.classList.toggle('bloom',s.garden.health>=70&&st>=4); g.classList.toggle('wilt',s.garden.health<40);
     const n=Core.now(), hA=(n.getHours()%12+n.getMinutes()/60)*30, mA=n.getMinutes()*6;
@@ -141,6 +143,7 @@ const HUD={
       </div></div>
       <div class="hud-r">
         <div class="row" style="gap:6px">
+          <button class="icon-btn" id="btnReq" title="Bảng lời mời kết bạn">${sv(IP.user,22)}<span class="req-dot hide" id="reqDot">0</span></button>
           <button class="icon-btn" id="btnLb" title="Bảng xếp hạng">${sv(IP.trophy,24)}</button>
           <button class="icon-btn" id="btnSet" title="Tài khoản & Cài đặt">${sv(IP.gear,24)}<span class="dot-on hide" id="cloudDot"></span></button>
         </div>
@@ -149,12 +152,13 @@ const HUD={
         <span class="tag rose hud-check hide" id="hudCheck">${sv(IP.calendar,13)} Điểm danh</span>
       </div>`;
     this.av=new Donkey({scale:.56,tilt:-14,yaw:28,acc:Core.s.acc.on}); this.av.pos(25,46); document.getElementById('hudAv').appendChild(this.av.el);
+    document.getElementById('btnReq').onclick=()=>openFriendRequests();
     document.getElementById('btnLb').onclick=()=>openLeaderboard();
     document.getElementById('btnSet').onclick=()=>openSettings();
     document.getElementById('hudCheck').onclick=()=>Overlays.morning(Core.s.pendingMorning);
-    document.getElementById('hudClock').onclick=()=>Nav.go('health','#sleep');
+    document.getElementById('hudClock').onclick=()=>openUsageSettings('limit');
     const nav=document.getElementById('nav');
-    nav.innerHTML=[['quest','Sức Khỏe','q'],['chat','Cộng Đồng','f'],['podium','Xếp Hạng','l'],['bag','Túi Đồ','b']].map(([i,t,f])=>`<button data-f="${f}">${sv(IP[i],26)}<span>${t}</span>${i==='quest'?'<span class="badge" id="qBadge"></span>':''}</button>`).join('');
+    nav.innerHTML=[['quest','Sức Khỏe','q'],['chat','Cộng Đồng','f'],['podium','Xếp Hạng','l'],['bag','Túi Đồ','b']].map(([i,t,f])=>`<button data-f="${f}">${sv(IP[i],26)}<span>${t}</span>${i==='quest'?'<span class="badge" id="qBadge"></span>':i==='chat'?'<span class="badge" id="fBadge" style="display:none"></span>':''}</button>`).join('');
     const F={q:()=>Nav.go('health','#tasks'),f:()=>openFriends(),l:()=>openLeaderboard(),b:()=>openBag()};
     nav.querySelectorAll('button').forEach(b=>b.onclick=()=>F[b.dataset.f]());
     const chip=this.chip=document.createElement('div'); chip.className='lock-chip card hide'; document.getElementById('lobby').appendChild(chip);
@@ -163,13 +167,27 @@ const HUD={
     $('hudName').textContent=s.name; $('hudGem').textContent=s.gems;
     $('bE').style.width=s.energy+'%'; $('vE').textContent=Math.round(s.energy)+'%';
     $('bH').style.width=s.happy+'%'; $('vH').textContent=Math.round(s.happy)+'%';
-    const rem=Core.screenRemaining(), lim=s.screen.limit+s.screen.extra;
-    $('bS').style.width=U.clamp(rem/lim*100)+'%'; $('vS').textContent=rem>0?rem+'p':'Khóa'; $('bSw').classList.toggle('warn',rem<=20);
+    const mode=s.block.mode||'apps';
+    if(mode==='lockdown'){
+      const rem=Core.screenRemaining(), lim=s.screen.limit+s.screen.extra;
+      $('bS').style.width=U.clamp(rem/Math.max(1,lim)*100)+'%'; $('vS').textContent=rem>0?rem+'p':'Khóa'; $('bSw').classList.toggle('warn',rem<=20);
+    } else if(mode==='groups'){
+      const gs=s.block.groups||[], lk=gs.filter(g=>Core.groupUsed(g)>=g.limit+(s.screen.extra||0)).length;
+      const pct=gs.length?((gs.length-lk)/gs.length*100):100;
+      $('bS').style.width=U.clamp(pct)+'%'; $('vS').textContent=lk?lk+'kh':gs.length+'nh'; $('bSw').classList.toggle('warn',lk>0);
+    } else {
+      const apps=Core.activeAppEntries(), lk=apps.filter(a=>a.locked).length;
+      const pct=apps.length?((apps.length-lk)/apps.length*100):100;
+      $('bS').style.width=U.clamp(pct)+'%'; $('vS').textContent=lk?lk+'kh':apps.length+'app'; $('bSw').classList.toggle('warn',lk>0);
+    }
     const n=Core.now(); $('hudClock').innerHTML=`${sv(Core.isNight()?IP.moon:IP.sun,15)}${U.hm(n)}${s.offset?'<span style="font-size:9px;opacity:.6">test</span>':''}`;
     const b=$('hudBuff'); if(Core.hasBuff()){ b.className='tag moss'; b.innerHTML=`${sv(IP.bolt,11)} +20% Gem`; } else if(Core.isTiredToday()){ b.className='tag rose'; b.textContent='Thiếu ngủ'; } else b.className='tag hide';
     $('hudCheck').classList.toggle('hide',!Core.canCheckIn()||Core.isBedtime());
     const dot=$('cloudDot'); if(dot) dot.classList.toggle('hide',!Cloud.online);
     const left=DATA.QUESTS.length-Core.questCount(); const qb=$('qBadge'); qb.textContent=left; qb.style.display=left?'':'none';
+    const fb=$('fBadge'); const pn=(typeof Cloud!=='undefined'&&Cloud.online)?Cloud.incomingIds.length:0;
+    if(fb){ fb.textContent=pn; fb.style.display=pn?'':'none'; }
+    const rd=$('reqDot'); if(rd){ rd.textContent=pn>9?'9+':pn; rd.classList.toggle('hide',!pn); }
     this.av.setMood(Core.mood());
     const lockTxt=s.screen.locked?`${sv(IP.lock,15)} Hết giờ màn hình • Làm Quest +5 phút`:(Core.isBedtime()&&s.night.broken?`${sv(IP.moon,15)} Đang thức khuya quá ${s.sleep.bed}`:'');
     this.chip.classList.toggle('hide',!lockTxt); this.chip.innerHTML=lockTxt; },
@@ -220,7 +238,7 @@ function openPets(){ const sh=UI.sheet({title:'Khu Thú Cưng',icon:'paw'});
       <p class="muted" style="margin:6px 0 8px">Cho ăn đúng bữa: <b>+10 Gem / mỗi bé</b> (nhân ưu đãi), <b>+20 XP lớn</b>.</p>
       <button class="btn pri full" data-a="feed">${sv(IP.bowl,22)} Cho cả đàn ăn</button><div class="divider"></div>
       <b>Các loài thú cưng</b><div class="grid2" style="margin-top:8px">${Object.entries(DATA.PETS).map(([id,p])=>{ const own=s.pets.owned.includes(id), lv=own?Core.petLv(id):0;
-        return `<div class="pet-card card" style="${own?'':'background:#ede8c8'}"><div style="${own?'':'filter:grayscale(1) opacity(.55)'};transform:scale(${own?DATA.PET_LV[lv].scale:1});transform-origin:50% 100%">${sv(IP[id],60,'0 0 50 40')}</div>${p.name}
+        return `<div class="pet-card card ${own?'':'tint-cream'}"><div style="${own?'':'filter:grayscale(1) opacity(.55)'};transform:scale(${own?DATA.PET_LV[lv].scale:1});transform-origin:50% 100%">${sv(IP[id],60,'0 0 50 40')}</div>${p.name}
           ${own?`<span class="tag moss">Lv${lv+1} • ${DATA.PET_LV[lv].name}</span><div style="width:100%;padding:0 6px">${xpBar(s.pets.xp[id]||0,DATA.PET_LV,lv)}</div>`:`<button class="btn sm rose" data-adopt="${id}">${sv(IP.gem,14)} ${p.price} • Nhận nuôi</button>`}</div>`; }).join('')}</div>`;
     sh.body.querySelector('[data-a=feed]').onclick=async()=>{ const r=Core.feed(); if(!r.ok){ UI.toast(r.msg); return; }
       sh.close(); await Lobby.feedFx(r.ups); UI.toast(careToast('Các bé ăn ngon lành!',r)); Lobby.refresh(); };
@@ -240,17 +258,17 @@ const Start={
     const meta=Cloud.online?Cloud.meta():null;
     const preName=(Cloud.profile&&Cloud.profile.name)||(meta&&meta.name)||'';
     const authCard=Cloud.online
-      ?`<div class="row card" style="padding:8px 10px;margin-bottom:10px;background:#e4ecd2">${avHTML(Cloud.profile||{avatar_url:meta&&meta.avatar},36)}<div class="grow" style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(preName)}</b><span class="muted">Đã kết nối đám mây • ${U.esc((meta&&meta.provider)||'online')}</span></div><button class="btn sm" data-a="logout">${sv(IP.logout,15)}</button></div>`
+      ?`<div class="row card tint-moss" style="padding:8px 10px;margin-bottom:10px">${avHTML(Cloud.profile||{avatar_url:meta&&meta.avatar},36)}<div class="grow" style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(preName)}</b><span class="muted">Đã kết nối đám mây • ${U.esc((meta&&meta.provider)||'online')}</span></div><button class="btn sm" data-a="logout">${sv(IP.logout,15)}</button></div>`
       :`<div style="margin-bottom:10px">${oauthButtonsHTML()}${!Cloud.enabled?'<p class="muted center" style="margin-top:4px;font-size:11.5px">Chưa cấu hình config.js — vẫn có thể chơi ngoại tuyến</p>':''}</div>`;
 
     el.innerHTML=`<div class="start-wrap">
       <div class="start-hero">
         <div class="title"><h1>LỪA CHILL</h1><div class="sub">Healthy habits in a digital world</div><div class="sdg"><span class="tag mid">UN SDG 3</span><span class="tag moss">Sống khỏe thời số</span></div></div>
-        <div class="scene" id="stScene"><div style="position:absolute;left:50%;top:6px;transform:translateX(-30%) scale(1.02)">${SCENE.house}</div><div style="position:absolute;left:4%;top:118px">${SCENE.tree()}</div><div style="position:absolute;right:2%;top:148px">${SCENE.bush}</div></div>
+        <div class="scene" id="stScene"><div style="position:absolute;left:50%;top:6px;transform:translateX(-30%) scale(1.02)">${SCENE.houseOf(s&&s.decor?s.decor.house:'mushroom')}</div><div style="position:absolute;left:4%;top:118px">${SCENE.tree()}</div><div style="position:absolute;right:2%;top:148px">${SCENE.bush}</div></div>
       </div>
       <div class="form card">
         ${authCard}
-        ${s?`<h2 style="color:${C.mn}">Chào mừng trở lại, ${U.esc(s.name)}!</h2>
+        ${s?`<h2 class="txt-accent">Chào mừng trở lại, ${U.esc(s.name)}!</h2>
           <p class="muted">${sv(IP.gem,14)} ${s.gems} Gem • Ngủ ngon ${s.sleep.streak} ngày • Lịch ngủ ${s.sleep.bed} → ${s.sleep.wake}</p>
           <div class="row" style="margin-top:10px"><button class="btn grow" data-a="new">Chơi mới</button><button class="btn pri big grow" data-a="cont">TIẾP TỤC</button></div>`
         :`<label style="font-weight:800">Tên của bạn</label>

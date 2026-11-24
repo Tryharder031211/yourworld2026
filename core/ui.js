@@ -91,3 +91,49 @@ function copyText(txt,okMsg){
     navigator.clipboard.writeText(txt).then(()=>UI.toast(okMsg)).catch(()=>UI.toast('Mã của bạn: '+txt));
   } else UI.toast('Mã của bạn: '+txt);
 }
+
+/* ---------- Theme giao diện miễn phí + Dark/Light Mode cho TẤT CẢ các Theme ---------- */
+function applyTheme(themeOrObj, schemeOpt){
+  let th=null, sc=null;
+  if(themeOrObj && typeof themeOrObj==='object'){ th=themeOrObj.theme; sc=themeOrObj.scheme; }
+  else { th=themeOrObj; sc=schemeOpt; }
+  th=th||(typeof Core!=='undefined'&&Core.s&&Core.s.theme)||(typeof localStorage!=='undefined'&&localStorage.getItem('lc_theme'))||'classic';
+  sc=sc||(typeof Core!=='undefined'&&Core.s&&Core.s.scheme)||(typeof localStorage!=='undefined'&&localStorage.getItem('lc_scheme'))||'light';
+  if(th==='darkforest'){ th='forest'; sc='dark'; }
+  sc=(sc==='dark'?'dark':'light');
+  document.documentElement.dataset.theme=th;
+  document.documentElement.dataset.scheme=sc;
+}
+function themePickerHTML(){
+  const cur=(typeof Core!=='undefined'&&Core.s&&Core.s.theme)||document.documentElement.dataset.theme||'classic';
+  const sc=(typeof Core!=='undefined'&&Core.s&&Core.s.scheme)||document.documentElement.dataset.scheme||'light';
+  const isDark=sc==='dark';
+  return `<div class="scheme-bar" style="margin-bottom:10px">
+      <div class="seg">
+        <button class="${!isDark?'on':''}" data-sc="light">${sv(IP.sun,15)} Chế độ Sáng (Light)</button>
+        <button class="${isDark?'on':''}" data-sc="dark">${sv(IP.moon,15)} Chế độ Tối (Dark)</button>
+      </div>
+    </div>
+    <div class="theme-grid">${DATA.THEMES.map(t=>{
+    const on=t.id===cur, dots=(isDark&&t.dsw)?t.dsw:t.sw;
+    return `<button class="theme-card card ${on?'on':''}" data-th="${t.id}">
+      <div class="theme-dots">${dots.map(c=>`<i style="background:${c}"></i>`).join('')}</div>
+      <b style="font-size:12.5px;line-height:1.15">${t.name}</b>
+      <span class="muted" style="font-size:10.5px">${on?(isDark?'Đang dùng (Tối) ✓':'Đang dùng (Sáng) ✓'):'Sáng & Tối • Miễn phí'}</span>
+    </button>`;
+  }).join('')}</div>`;
+}
+function bindThemePicker(root,onPick){
+  root.querySelectorAll('[data-sc]').forEach(b=>b.onclick=()=>{
+    const sc=b.dataset.sc;
+    Core.setScheme(sc); applyTheme(null,sc);
+    UI.toast(sc==='dark'?'Đã bật Chế độ Tối (Dark Mode) 🌙':'Đã bật Chế độ Sáng (Light Mode) ☀️');
+    onPick&&onPick();
+  });
+  root.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>{
+    Core.setTheme(b.dataset.th); applyTheme(b.dataset.th);
+    const t=DATA.THEMES.find(x=>x.id===b.dataset.th);
+    UI.toast(`Đã đổi giao diện: ${t?t.name:b.dataset.th}`);
+    onPick&&onPick();
+  });
+}

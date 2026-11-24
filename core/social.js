@@ -32,19 +32,50 @@ function safeRoom(r){
   return {wall:'#F7F4D5',floor:'#c99a6b',placed:[{uid:'s1',id:'bed',gx:0,gy:1,rot:0},{uid:'s2',id:'plant',gx:5,gy:0,rot:0}]};
 }
 
+/* ---------------- Hộp thoại xác nhận Doodle (tương thích Dark & Light Mode) ---------------- */
+function confirmSocialAction({title, body, okLabel='Xác nhận', okCls='rose', onOk}){
+  const m=UI.modal(`<div class="row"><h3 class="grow txt-accent">${title}</h3><button class="x-btn" data-x>${sv(IP.x,16)}</button></div>
+    <p class="muted" style="margin:8px 0 12px">${body}</p>
+    <div class="row">
+      <button class="btn grow" data-x>Để sau</button>
+      <button class="btn ${okCls} grow" data-ok>${okLabel}</button>
+    </div>`);
+  m.box.querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>m.close());
+  m.box.querySelector('[data-ok]').onclick=async()=>{
+    const btn=m.box.querySelector('[data-ok]'); btn.disabled=true;
+    try{ await onOk(); m.close(); }
+    catch(e){ btn.disabled=false; UI.toast('Lỗi: '+(e.message||e)); }
+  };
+}
+
 /* ---------------- Ghé thăm phòng người chơi thật ---------------- */
-async function visitUser(pOrId){
+async function visitUser(pOrId, onMutate){
   if(!Cloud.online) return;
   let p=typeof pOrId==='string'?null:pOrId;
   if(!p || p.room===undefined){
     try{ p=await Cloud.getProfile(typeof pOrId==='string'?pOrId:pOrId.id); }catch(e){ UI.toast('Không tải được hồ sơ'); return; }
   }
   if(!p){ UI.toast('Không tìm thấy người chơi'); return; }
-  const isMe=p.id===Cloud.uid, isFr=Cloud.friendIds.includes(p.id);
+  await Cloud.loadBlocks();
+  await Cloud.loadFriends();
+  const isMe=p.id===Cloud.uid, rel=Cloud.relOf(p.id);
   const todaySc=p.screen_day===Core.s.day?`${p.screen_today} phút hôm nay`:'Chưa đồng bộ hôm nay';
+  const relBtns=rel==='blocked'
+    ?`<button class="btn moss grow" data-a="unblk">${sv(IP.shield,16)} Bỏ chặn người này</button>`
+    :rel==='friend'
+    ?`<button class="btn pri grow" data-a="dm">${sv(IP.chat,16)} Nhắn tin</button><button class="btn grow" data-a="unfr">${sv(IP.x,14)} Xóa bạn</button><button class="btn rose" data-a="blk" title="Chặn">${sv(IP.ban,16)} Chặn</button>`
+    :rel==='incoming'
+    ?`<button class="btn moss grow" data-a="acc">${sv(IP.check,16)} Đồng ý</button><button class="btn rose grow" data-a="dec">${sv(IP.x,15)} Không đồng ý</button><button class="btn" data-a="blk" title="Chặn">${sv(IP.ban,16)}</button>`
+    :rel==='outgoing'
+    ?`<button class="btn grow" data-a="can">Hủy lời mời</button><button class="btn pri grow" data-a="dm">${sv(IP.chat,16)} Nhắn tin</button><button class="btn rose" data-a="blk" title="Chặn">${sv(IP.ban,16)}</button>`
+    :`<button class="btn moss grow" data-a="req">${sv(IP.plus,15)} Kết bạn</button><button class="btn pri grow" data-a="dm">${sv(IP.chat,16)} Nhắn tin</button><button class="btn rose" data-a="blk" title="Chặn">${sv(IP.ban,16)}</button>`;
+  const statusTxt=rel==='blocked'?' • <b class="txt-danger">Đã chặn</b>'
+    :rel==='incoming'?' • <b class="txt-danger">Đã gửi lời mời kết bạn cho bạn</b>'
+    :rel==='outgoing'?' • <b>Đang chờ đồng ý</b>'
+    :rel==='friend'?' • <b>Bạn bè</b>':'';
   const m=UI.modal(`<div class="row">${avHTML(p,48)}
-      <div class="grow" style="min-width:0"><h2 style="color:${C.mn};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(p.name)}</h2>
-        <div class="muted">Mã bạn bè: <b>${U.esc(p.friend_code||'—')}</b></div></div>
+      <div class="grow" style="min-width:0"><h2 class="txt-accent" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(p.name)}</h2>
+        <div class="muted">Mã bạn bè: <b>${U.esc(p.friend_code||'—')}</b>${statusTxt}</div></div>
       <button class="x-btn" data-x>${sv(IP.x,16)}</button></div>
     <div class="row" style="gap:5px;margin:8px 0;flex-wrap:wrap">
       <span class="tag moss">${sv(IP.moon,12)} Ngủ ngon ${p.sleep_streak||0} ngày</span>
@@ -55,16 +86,34 @@ async function visitUser(pOrId){
     <div class="card" style="background:linear-gradient(#e9e3bd,#F7F4D5);padding:4px">
       <svg viewBox="0 -6 390 330" width="100%">${roomSVG(safeRoom(p.room))}</svg>
     </div>
-    ${isMe?'':`<div class="row" style="margin-top:10px">
-      ${isFr?`<button class="btn grow" data-a="unfr">Hủy kết bạn</button>`:`<button class="btn moss grow" data-a="add">${sv(IP.plus,16)} Kết bạn</button>`}
-      <button class="btn pri grow" data-a="dm">${sv(IP.chat,18)} Nhắn tin</button>
-    </div>`}`);
+    ${isMe?'':`<div class="row" style="margin-top:10px;flex-wrap:wrap">${relBtns}</div>`}`);
   fixAvatars(m.box);
   m.box.querySelector('[data-x]').onclick=()=>m.close();
-  const add=m.box.querySelector('[data-a=add]');
-  if(add) add.onclick=async()=>{ try{ await Cloud.addFriend(p.id); UI.toast(`Đã kết bạn với ${U.esc(p.name)}!`); m.close(); }catch(e){ UI.toast('Lỗi kết bạn: '+e.message); } };
+  const done=()=>{ m.close(); onMutate&&onMutate(); };
+  const req=m.box.querySelector('[data-a=req]');
+  if(req) req.onclick=async()=>{ try{ const r=await Cloud.sendRequest(p.id); UI.toast(r==='friend'?`Đã trở thành bạn bè với ${U.esc(p.name)}!`:`Đã gửi lời mời kết bạn tới ${U.esc(p.name)}`); done(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+  const acc=m.box.querySelector('[data-a=acc]');
+  if(acc) acc.onclick=async()=>{ try{ await Cloud.acceptRequest(p.id); UI.toast(`Đã đồng ý kết bạn với ${U.esc(p.name)}!`); done(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+  const dec=m.box.querySelector('[data-a=dec]');
+  if(dec) dec.onclick=async()=>{ try{ await Cloud.declineRequest(p.id); UI.toast('Đã không đồng ý lời mời kết bạn'); done(); }catch(e){ UI.toast(e.message); } };
+  const can=m.box.querySelector('[data-a=can]');
+  if(can) can.onclick=async()=>{ try{ await Cloud.cancelRequest(p.id); UI.toast('Đã hủy lời mời kết bạn'); done(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
   const unf=m.box.querySelector('[data-a=unfr]');
-  if(unf) unf.onclick=async()=>{ if(!confirm(`Hủy kết bạn với ${p.name}?`)) return; try{ await Cloud.removeFriend(p.id); UI.toast('Đã hủy kết bạn'); m.close(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+  if(unf) unf.onclick=()=>confirmSocialAction({
+    title:`Xóa bạn ${U.esc(p.name)}?`,
+    body:'Hai bạn sẽ không còn trong danh sách bạn bè nữa. Sau này vẫn có thể gửi lại lời mời kết bạn.',
+    okLabel:'Xóa bạn', okCls:'rose',
+    onOk:async()=>{ await Cloud.removeFriend(p.id); UI.toast(`Đã xóa ${U.esc(p.name)} khỏi danh sách bạn bè`); done(); }
+  });
+  const blk=m.box.querySelector('[data-a=blk]');
+  if(blk) blk.onclick=()=>confirmSocialAction({
+    title:`Chặn ${U.esc(p.name)}?`,
+    body:'Chặn sẽ tự động xóa kết bạn/lời mời, ẩn tin nhắn của người này và ngăn họ gửi lại lời mời kết bạn. Bạn có thể bỏ chặn bất kỳ lúc nào ở mục Đã chặn.',
+    okLabel:'Chặn ngay', okCls:'rose',
+    onOk:async()=>{ await Cloud.block(p.id); UI.toast(`Đã chặn ${U.esc(p.name)}`); done(); }
+  });
+  const unblk=m.box.querySelector('[data-a=unblk]');
+  if(unblk) unblk.onclick=async()=>{ try{ await Cloud.unblock(p.id); UI.toast(`Đã bỏ chặn ${U.esc(p.name)}`); done(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
   const dm=m.box.querySelector('[data-a=dm]');
   if(dm) dm.onclick=()=>{ m.close(); openDM(p); };
 }
@@ -81,8 +130,17 @@ function mountChatRoom(container, room, {showSender=true, emptyText='Chưa có t
 
   const msgMenu=m=>{
     const who=names[m.user_id]||{id:m.user_id,name:'Người chơi'};
+    const rel=Cloud.relOf(m.user_id);
+    const frBtn=rel==='friend'
+      ?`<button class="btn full" data-a="unfr">${sv(IP.x,16)} Xóa bạn</button>`
+      :rel==='incoming'
+      ?`<button class="btn moss full" data-a="acc">${sv(IP.check,18)} Đồng ý kết bạn</button>`
+      :rel==='outgoing'
+      ?`<button class="btn full" data-a="can">Đang chờ • Hủy lời mời</button>`
+      :`<button class="btn moss full" data-a="add">${sv(IP.plus,18)} Kết bạn</button>`;
     const mod=UI.modal(`<div class="row">${avHTML(who,40)}<b class="grow">${U.esc(who.name)}</b><button class="x-btn" data-x>${sv(IP.x,16)}</button></div>
       <div class="col" style="margin-top:10px">
+        ${frBtn}
         <button class="btn full" data-a="visit">${sv(IP.home,18)} Ghé thăm phòng</button>
         <button class="btn full" data-a="dm">${sv(IP.chat,18)} Nhắn tin riêng</button>
         <button class="btn rose full" data-a="rep">${sv(IP.flag,18)} Báo cáo tin nhắn</button>
@@ -90,10 +148,23 @@ function mountChatRoom(container, room, {showSender=true, emptyText='Chưa có t
       </div>`);
     fixAvatars(mod.box);
     mod.box.querySelector('[data-x]').onclick=()=>mod.close();
+    const bAdd=mod.box.querySelector('[data-a=add]');
+    if(bAdd) bAdd.onclick=async()=>{ try{ const r=await Cloud.sendRequest(m.user_id); UI.toast(r==='friend'?`Đã thành bạn bè với ${U.esc(who.name)}!`:`Đã gửi lời mời kết bạn tới ${U.esc(who.name)}`); mod.close(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+    const bAcc=mod.box.querySelector('[data-a=acc]');
+    if(bAcc) bAcc.onclick=async()=>{ try{ await Cloud.acceptRequest(m.user_id); UI.toast(`Đã đồng ý kết bạn với ${U.esc(who.name)}!`); mod.close(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+    const bCan=mod.box.querySelector('[data-a=can]');
+    if(bCan) bCan.onclick=async()=>{ try{ await Cloud.cancelRequest(m.user_id); UI.toast('Đã hủy lời mời kết bạn'); mod.close(); }catch(e){ UI.toast('Lỗi: '+e.message); } };
+    const bUnfr=mod.box.querySelector('[data-a=unfr]');
+    if(bUnfr) bUnfr.onclick=()=>{ mod.close(); confirmSocialAction({ title:`Xóa bạn ${U.esc(who.name)}?`, body:'Xóa khỏi danh sách bạn bè của bạn.', okLabel:'Xóa bạn', okCls:'rose', onOk:async()=>{ await Cloud.removeFriend(m.user_id); UI.toast(`Đã xóa bạn ${U.esc(who.name)}`); } }); };
     mod.box.querySelector('[data-a=visit]').onclick=()=>{ mod.close(); visitUser(m.user_id); };
     mod.box.querySelector('[data-a=dm]').onclick=()=>{ mod.close(); openDM(who); };
     mod.box.querySelector('[data-a=rep]').onclick=async()=>{ try{ await Cloud.report(m,'Báo cáo bởi người dùng'); UI.toast('Đã gửi báo cáo. Cảm ơn bạn giữ cộng đồng lành mạnh!'); }catch(e){ UI.toast('Không gửi được: '+e.message); } mod.close(); };
-    mod.box.querySelector('[data-a=blk]').onclick=async()=>{ await Cloud.block(m.user_id); UI.toast(`Đã chặn ${U.esc(who.name)}`); mod.close(); renderMsgs(); };
+    mod.box.querySelector('[data-a=blk]').onclick=()=>{ mod.close(); confirmSocialAction({
+      title:`Chặn ${U.esc(who.name)}?`,
+      body:'Người này sẽ bị ẩn khỏi chat, danh sách bạn bè và không thể gửi lời mời kết bạn cho bạn.',
+      okLabel:'Chặn ngay', okCls:'rose',
+      onOk:async()=>{ await Cloud.block(m.user_id); UI.toast(`Đã chặn ${U.esc(who.name)}`); renderMsgs(); }
+    }); };
   };
 
   const renderMsgs=()=>{
@@ -166,27 +237,156 @@ function mountChatRoom(container, room, {showSender=true, emptyText='Chưa có t
   return ()=>{ closed=true; if(sub) sub.close(); };
 }
 
-/* ---------------- Chat riêng 1-1 ---------------- */
+/* ---------------- Chat riêng 1-1 (có nút Phòng • Xóa bạn • Chặn / Bỏ chặn) ---------------- */
 function openDM(p){
   if(!Cloud.online){ openFriends(); return; }
   const sh=UI.sheet({title:U.esc(p.name),body:''});
   sh.el.querySelector('.sheet-h').insertAdjacentHTML('afterbegin',avHTML(p,34));
   fixAvatars(sh.el);
-  const todaySc=p.screen_day===Core.s.day?`${p.screen_today}p`:'—';
-  sh.body.innerHTML=`<div class="row" style="gap:5px;margin-bottom:8px;flex-wrap:wrap">
-      <span class="tag moss">${sv(IP.moon,12)} Ngủ ngon ${p.sleep_streak||0} ngày</span>
-      <span class="tag">${sv(IP.phone,12)} ${todaySc} vs bạn ${Core.s.screen.used}p</span>
-      <button class="btn sm" style="margin-left:auto" data-v>${sv(IP.home,14)} Phòng</button>
-    </div><div id="dmWrap"></div>`;
-  sh.body.querySelector('[data-v]').onclick=()=>visitUser(p);
-  const off=mountChatRoom(sh.body.querySelector('#dmWrap'),Cloud.dmRoom(Cloud.uid,p.id),{showSender:false,emptyText:`Bắt đầu trò chuyện cùng ${U.esc(p.name)}!`});
-  sh.track(off);
+  let off=null;
+  const clearSub=()=>{ if(off){ off(); off=null; } };
+  sh.track(clearSub);
+
+  const draw=()=>{
+    clearSub();
+    if(Cloud.isBlocked(p.id)){
+      sh.body.innerHTML=`<div class="card tint-rose center" style="padding:18px">
+        ${sv(IP.ban,42)}
+        <h3 style="margin-top:8px">Bạn đã chặn ${U.esc(p.name)}</h3>
+        <p class="muted" style="margin:6px 0 12px">Tin nhắn và lời mời từ người này đang bị ẩn. Bỏ chặn nếu bạn muốn trò chuyện lại.</p>
+        <button class="btn moss" data-unblk>${sv(IP.shield,16)} Bỏ chặn</button>
+      </div>`;
+      sh.body.querySelector('[data-unblk]').onclick=async()=>{ await Cloud.unblock(p.id); UI.toast(`Đã bỏ chặn ${U.esc(p.name)}`); draw(); };
+      return;
+    }
+    const todaySc=p.screen_day===Core.s.day?`${p.screen_today}p`:'—', isFr=Cloud.relOf(p.id)==='friend';
+    sh.body.innerHTML=`<div class="row" style="gap:5px;margin-bottom:8px;flex-wrap:wrap">
+        <span class="tag moss">${sv(IP.moon,12)} ${p.sleep_streak||0} ngày</span>
+        <span class="tag">${sv(IP.phone,12)} ${todaySc}</span>
+        <div class="row" style="margin-left:auto;gap:5px">
+          <button class="btn sm" data-v>${sv(IP.home,14)} Phòng</button>
+          ${isFr?`<button class="btn sm" data-unfr title="Xóa bạn">${sv(IP.x,13)} Xóa bạn</button>`:''}
+          <button class="btn sm rose" data-blk title="Chặn người này">${sv(IP.ban,14)} Chặn</button>
+        </div>
+      </div><div id="dmWrap"></div>`;
+    sh.body.querySelector('[data-v]').onclick=()=>visitUser(p,draw);
+    const unfr=sh.body.querySelector('[data-unfr]');
+    if(unfr) unfr.onclick=()=>confirmSocialAction({
+      title:`Xóa bạn ${U.esc(p.name)}?`,
+      body:'Xóa khỏi danh sách bạn bè của bạn.',
+      okLabel:'Xóa bạn', okCls:'rose',
+      onOk:async()=>{ await Cloud.removeFriend(p.id); UI.toast(`Đã xóa bạn ${U.esc(p.name)}`); draw(); }
+    });
+    sh.body.querySelector('[data-blk]').onclick=()=>confirmSocialAction({
+      title:`Chặn ${U.esc(p.name)}?`,
+      body:'Chặn sẽ tự động xóa kết bạn và ẩn mọi tin nhắn của người này.',
+      okLabel:'Chặn ngay', okCls:'rose',
+      onOk:async()=>{ await Cloud.block(p.id); UI.toast(`Đã chặn ${U.esc(p.name)}`); draw(); }
+    });
+    off=mountChatRoom(sh.body.querySelector('#dmWrap'),Cloud.dmRoom(Cloud.uid,p.id),{showSender:false,emptyText:`Bắt đầu trò chuyện cùng ${U.esc(p.name)}!`});
+  };
+  draw();
 }
 
-/* ---------------- Sheet Cộng đồng & Bạn bè ---------------- */
-function openFriends(){
+/* ---------------- Bộ vẽ Bảng Lời Mời Kết Bạn (dùng chung cho Sheet riêng & Tab Lời mời) ---------------- */
+async function renderRequestsBoard(body, onUpdated){
+  body.innerHTML='<p class="muted center">Đang tải bảng lời mời kết bạn...</p>';
+  try{
+    const {incoming,outgoing}=await Cloud.pending();
+    const inHTML=incoming.length?incoming.map(p=>`<div class="fr-card card tint-warm">
+      <div class="row">
+        ${avHTML(p,42)}
+        <div class="grow" style="min-width:0">
+          <div class="t" style="font-weight:800;font-size:15px">${U.esc(p.name)}</div>
+          <div class="muted">Mã ${U.esc(p.friend_code||'—')} • ${p.gems||0} Gem • ngủ ngon ${p.sleep_streak||0} ngày</div>
+        </div>
+        <button class="btn sm" data-v="${p.id}" title="Thăm phòng">${sv(IP.home,14)}</button>
+      </div>
+      <div class="fr-acts">
+        <button class="btn sm moss grow" data-acc="${p.id}">${sv(IP.check,15)} Đồng ý</button>
+        <button class="btn sm rose grow" data-dec="${p.id}">${sv(IP.x,14)} Không đồng ý</button>
+        <button class="btn sm" data-blk="${p.id}" data-nm="${U.esc(p.name)}" title="Chặn người này">${sv(IP.ban,14)} Chặn</button>
+      </div>
+    </div>`).join(''):`<div class="card center tint-cream" style="padding:14px;margin-bottom:10px">
+      <p class="muted">Hiện chưa có lời mời kết bạn nào gửi đến bạn.</p>
+    </div>`;
+
+    const outHTML=outgoing.length?outgoing.map(p=>`<div class="li card">
+      ${avHTML(p,40)}
+      <div class="grow" style="min-width:0">
+        <div class="t">${U.esc(p.name)}</div>
+        <div class="row" style="gap:5px;margin-top:2px;flex-wrap:wrap"><span class="tag">Đang chờ đồng ý</span><span class="muted">Mã ${U.esc(p.friend_code||'')}</span></div>
+      </div>
+      <button class="btn sm" data-vo="${p.id}" title="Thăm phòng">${sv(IP.home,14)}</button>
+      <button class="btn sm rose" data-can="${p.id}">Hủy lời mời</button>
+    </div>`).join(''):'<p class="muted" style="margin:4px 0">Bạn chưa gửi lời mời nào đang chờ phản hồi.</p>';
+
+    body.innerHTML=`<div class="row" style="margin-bottom:8px">
+        <b class="grow">Lời mời kết bạn đến (${incoming.length})</b>
+        ${incoming.length?`<span class="tag rose">Chờ bạn duyệt</span>`:''}
+        <button class="btn sm" data-ref title="Tải lại">↻</button>
+      </div>
+      ${inHTML}
+      <div class="divider"></div>
+      <div class="row" style="margin-bottom:6px"><b class="grow">Lời mời đã gửi (${outgoing.length})</b></div>
+      ${outHTML}`;
+    fixAvatars(body);
+
+    const refresh=()=>{ if(onUpdated) onUpdated(); else renderRequestsBoard(body,onUpdated); };
+    body.querySelector('[data-ref]').onclick=refresh;
+    body.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>visitUser(incoming.find(x=>x.id===b.dataset.v),refresh));
+    body.querySelectorAll('[data-vo]').forEach(b=>b.onclick=()=>visitUser(outgoing.find(x=>x.id===b.dataset.vo),refresh));
+    body.querySelectorAll('[data-acc]').forEach(b=>b.onclick=async()=>{
+      b.disabled=true;
+      try{ await Cloud.acceptRequest(b.dataset.acc); UI.toast('Đã đồng ý kết bạn! 🎉'); refresh(); }
+      catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+    });
+    body.querySelectorAll('[data-dec]').forEach(b=>b.onclick=async()=>{
+      b.disabled=true;
+      try{ await Cloud.declineRequest(b.dataset.dec); UI.toast('Đã không đồng ý lời mời kết bạn'); refresh(); }
+      catch(e){ b.disabled=false; UI.toast(e.message); }
+    });
+    body.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>confirmSocialAction({
+      title:`Chặn ${U.esc(b.dataset.nm||'người này')}?`,
+      body:'Lời mời kết bạn sẽ bị xóa và người này không thể gửi lại lời mời hay nhắn tin cho bạn.',
+      okLabel:'Chặn ngay', okCls:'rose',
+      onOk:async()=>{ await Cloud.block(b.dataset.blk); UI.toast(`Đã chặn ${U.esc(b.dataset.nm||'người dùng')}`); refresh(); }
+    }));
+    body.querySelectorAll('[data-can]').forEach(b=>b.onclick=async()=>{
+      b.disabled=true;
+      try{ await Cloud.cancelRequest(b.dataset.can); UI.toast('Đã hủy lời mời'); refresh(); }
+      catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+    });
+  }catch(e){ body.innerHTML=`<p class="muted center">Lỗi tải lời mời: ${U.esc(e.message)}</p>`; }
+}
+
+/* ---------------- Bảng Lời Mời Kết Bạn chuyên biệt (mở nhanh từ HUD / Bạn bè / Cài đặt) ---------------- */
+function openFriendRequests(){
+  const sh=UI.sheet({title:'Bảng Lời Mời Kết Bạn',icon:'user',cls:'wide'});
+  const draw=async()=>{
+    if(!Cloud.online){
+      sh.body.innerHTML=authGateHTML('Bảng lời mời kết bạn');
+      bindOAuth(sh.body);
+      return;
+    }
+    sh.body.innerHTML=`<div id="reqBoard"></div>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        <button class="btn sm grow" data-go="global">${sv(IP.plus,15)} Cộng đồng & Kết bạn</button>
+        <button class="btn sm grow" data-go="friends">${sv(IP.user,15)} Bạn bè (${Cloud.friendIds.length})</button>
+        <button class="btn sm grow" data-go="blocked">${sv(IP.ban,15)} Đã chặn (${Cloud.blocked.length})</button>
+      </div>`;
+    sh.body.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ sh.close(); openFriends(b.dataset.go); });
+    await renderRequestsBoard(sh.body.querySelector('#reqBoard'),draw);
+  };
+  draw();
+  sh.track(Cloud.on('auth',draw));
+}
+
+/* ---------------- Sheet Cộng đồng (gộp Kết bạn) • Bạn bè • Lời mời • Đã chặn ---------------- */
+function openFriends(initialTab='global'){
   const sh=UI.sheet({title:'Cộng Đồng & Bạn Bè',icon:'chat',cls:'wide'});
-  let tab='global', cleanup=null;
+  let focusFind=initialTab==='find';
+  let tab=(!initialTab||initialTab==='find')?'global':initialTab, cleanup=null;
   const clearSub=()=>{ if(cleanup){ cleanup(); cleanup=null; } };
   sh.track(clearSub);
 
@@ -197,16 +397,121 @@ function openFriends(){
       bindOAuth(sh.body);
       return;
     }
-    sh.body.innerHTML=`<div class="seg" style="margin-bottom:10px">
+    const inN=Cloud.incomingIds.length, blkN=Cloud.blocked.length;
+    sh.body.innerHTML=`<div class="seg soc-tabs" style="margin-bottom:10px">
         <button class="${tab==='global'?'on':''}" data-k="global">Cộng đồng</button>
         <button class="${tab==='friends'?'on':''}" data-k="friends">Bạn bè (${Cloud.friendIds.length})</button>
-        <button class="${tab==='find'?'on':''}" data-k="find">Tìm bạn</button>
+        <button class="${tab==='pending'?'on':''}" data-k="pending">Lời mời${inN?` (${inN})`:''}</button>
+        <button class="${tab==='blocked'?'on':''}" data-k="blocked">Đã chặn${blkN?` (${blkN})`:''}</button>
       </div><div id="socBody"></div>`;
     sh.body.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{ tab=b.dataset.k; render(); });
     const body=sh.body.querySelector('#socBody');
 
     if(tab==='global'){
-      cleanup=mountChatRoom(body,'global',{showSender:true,emptyText:'Phòng chat cộng đồng còn trống. Gửi lời chào đầu tiên nào!'});
+      const code=(Cloud.profile&&Cloud.profile.friend_code)||'------';
+      body.innerHTML=`<div class="card tint-moss" style="padding:10px 12px;margin-bottom:10px">
+          <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
+            ${sv(IP.user,18)}
+            <b class="grow" style="font-size:13.5px">Tìm & Kết bạn</b>
+            <span class="tag">Mã của bạn: <b class="txt-accent" style="letter-spacing:1px">${U.esc(code)}</b></span>
+            <button class="btn sm" id="cpCode" title="Sao chép mã bạn bè">${sv(IP.copy,14)} Copy</button>
+            ${inN?`<button class="btn sm rose" id="goPendQuick">Lời mời (${inN})</button>`:''}
+          </div>
+          <div class="row">
+            <input class="inp" id="fSearch" placeholder="Nhập tên hoặc mã 6 ký tự để kết bạn..." maxlength="24" style="font-size:13.5px;padding:6px 10px">
+            <button class="btn sm pri" id="fGo">${sv(IP.search,16)} Tìm</button>
+          </div>
+          <div id="fRes" style="margin-top:8px;display:none"></div>
+        </div>
+        <div id="gChatWrap"></div>`;
+
+      body.querySelector('#cpCode').onclick=()=>copyText(code,'Đã sao chép mã bạn bè: '+code);
+      const gp=body.querySelector('#goPendQuick');
+      if(gp) gp.onclick=()=>{ tab='pending'; render(); };
+
+      const fRes=body.querySelector('#fRes'), fIn=body.querySelector('#fSearch');
+      const runSearch=async()=>{
+        const q=fIn.value.trim();
+        fRes.style.display='';
+        if(q.length<2){ fRes.innerHTML='<p class="muted center">Nhập ít nhất 2 ký tự để tìm người chơi thật.</p>'; return; }
+        fRes.innerHTML='<p class="muted center">Đang tìm...</p>';
+        try{
+          await Cloud.loadBlocks();
+          await Cloud.loadFriends();
+          const rows=await Cloud.search(q);
+          const head=`<div class="row" style="margin-bottom:6px"><span class="muted grow">Kết quả cho "${U.esc(q)}" (${rows.length})</span><button class="btn sm" id="fClear">Đóng ×</button></div>`;
+          if(!rows.length){
+            fRes.innerHTML=`${head}<p class="muted center">Không tìm thấy ai khớp từ khóa này.</p>`;
+            fRes.querySelector('#fClear').onclick=()=>{ fRes.style.display='none'; fIn.value=''; };
+            return;
+          }
+          fRes.innerHTML=head+rows.map(p=>{
+            const rel=Cloud.relOf(p.id);
+            const act=rel==='blocked'
+              ?`<span class="tag rose">Đã chặn</span><button class="btn sm moss" data-unblk="${p.id}" data-nm="${U.esc(p.name)}">Bỏ chặn</button>`
+              :rel==='friend'
+              ?`<span class="tag moss">Bạn bè</span><button class="btn sm" data-unfr="${p.id}" data-nm="${U.esc(p.name)}">Xóa bạn</button><button class="btn sm rose" data-blk="${p.id}" data-nm="${U.esc(p.name)}" title="Chặn">${sv(IP.ban,13)}</button>`
+              :rel==='outgoing'
+              ?`<button class="btn sm" data-can="${p.id}">Đang chờ • Hủy</button><button class="btn sm rose" data-blk="${p.id}" data-nm="${U.esc(p.name)}" title="Chặn">${sv(IP.ban,13)}</button>`
+              :rel==='incoming'
+              ?`<button class="btn sm moss" data-acc="${p.id}">Đồng ý</button><button class="btn sm rose" data-dec="${p.id}">Không đồng ý</button>`
+              :`<button class="btn sm pri" data-add="${p.id}">${sv(IP.plus,14)} Kết bạn</button><button class="btn sm rose" data-blk="${p.id}" data-nm="${U.esc(p.name)}" title="Chặn">${sv(IP.ban,13)}</button>`;
+            return `<div class="fr-card card">
+              <div class="row">${avHTML(p,38)}
+                <div class="grow" style="min-width:0"><div class="t" style="font-weight:800;font-size:14.5px">${U.esc(p.name)}</div>
+                  <div class="muted">Mã ${U.esc(p.friend_code||'')} • ${p.gems||0} Gem • ngủ ${p.sleep_streak||0} ngày</div></div>
+                <button class="btn sm" data-vf="${p.id}" title="Thăm phòng">${sv(IP.home,14)}</button>
+              </div>
+              <div class="fr-acts">${act}</div>
+            </div>`;
+          }).join('');
+          fixAvatars(fRes);
+          fRes.querySelector('#fClear').onclick=()=>{ fRes.style.display='none'; fIn.value=''; };
+          fRes.querySelectorAll('[data-vf]').forEach(b=>b.onclick=()=>visitUser(rows.find(x=>x.id===b.dataset.vf),runSearch));
+          fRes.querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{
+            b.disabled=true;
+            try{ const r=await Cloud.sendRequest(b.dataset.add); UI.toast(r==='friend'?'Đã thành bạn bè!':'Đã gửi lời mời kết bạn!'); runSearch(); }
+            catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+          });
+          fRes.querySelectorAll('[data-acc]').forEach(b=>b.onclick=async()=>{
+            b.disabled=true;
+            try{ await Cloud.acceptRequest(b.dataset.acc); UI.toast('Đã đồng ý kết bạn!'); runSearch(); }
+            catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+          });
+          fRes.querySelectorAll('[data-dec]').forEach(b=>b.onclick=async()=>{
+            b.disabled=true;
+            try{ await Cloud.declineRequest(b.dataset.dec); UI.toast('Đã không đồng ý lời mời'); runSearch(); }
+            catch(e){ b.disabled=false; UI.toast(e.message); }
+          });
+          fRes.querySelectorAll('[data-can]').forEach(b=>b.onclick=async()=>{
+            b.disabled=true;
+            try{ await Cloud.cancelRequest(b.dataset.can); UI.toast('Đã hủy lời mời'); runSearch(); }
+            catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+          });
+          fRes.querySelectorAll('[data-unfr]').forEach(b=>b.onclick=()=>confirmSocialAction({
+            title:`Xóa bạn ${U.esc(b.dataset.nm)}?`,
+            body:'Xóa người này khỏi danh sách bạn bè của bạn.',
+            okLabel:'Xóa bạn', okCls:'rose',
+            onOk:async()=>{ await Cloud.removeFriend(b.dataset.unfr); UI.toast(`Đã xóa bạn ${U.esc(b.dataset.nm)}`); runSearch(); }
+          }));
+          fRes.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>confirmSocialAction({
+            title:`Chặn ${U.esc(b.dataset.nm)}?`,
+            body:'Chặn sẽ tự động xóa kết bạn/lời mời và ẩn người này khỏi chat.',
+            okLabel:'Chặn ngay', okCls:'rose',
+            onOk:async()=>{ await Cloud.block(b.dataset.blk); UI.toast(`Đã chặn ${U.esc(b.dataset.nm)}`); runSearch(); }
+          }));
+          fRes.querySelectorAll('[data-unblk]').forEach(b=>b.onclick=async()=>{
+            b.disabled=true;
+            try{ await Cloud.unblock(b.dataset.unblk); UI.toast(`Đã bỏ chặn ${U.esc(b.dataset.nm)}`); runSearch(); }
+            catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+          });
+        }catch(e){ fRes.innerHTML=`<p class="muted center">Lỗi tìm kiếm: ${U.esc(e.message)}</p>`; }
+      };
+      body.querySelector('#fGo').onclick=runSearch;
+      fIn.onkeydown=e=>{ if(e.key==='Enter') runSearch(); };
+      if(focusFind){ focusFind=false; setTimeout(()=>fIn.focus(),80); }
+
+      cleanup=mountChatRoom(body.querySelector('#gChatWrap'),'global',{showSender:true,emptyText:'Phòng chat cộng đồng còn trống. Gửi lời chào đầu tiên nào!'});
       return;
     }
 
@@ -214,74 +519,101 @@ function openFriends(){
       body.innerHTML='<p class="muted center">Đang tải danh sách bạn bè...</p>';
       try{
         const list=await Cloud.friends();
+        const topTools=`<div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+          <button class="btn sm ${Cloud.incomingIds.length?'rose':'moss'} grow" data-open-req>${sv(IP.user,15)} Bảng lời mời kết bạn${Cloud.incomingIds.length?` (${Cloud.incomingIds.length})`:''}</button>
+          <button class="btn sm pri" data-go-find>${sv(IP.plus,15)} Thêm bạn</button>
+          <button class="btn sm" data-go-blk>${sv(IP.ban,15)} Đã chặn (${Cloud.blocked.length})</button>
+        </div>`;
         if(!list.length){
-          body.innerHTML=`<div class="card center" style="padding:18px">
+          body.innerHTML=`${topTools}<div class="card center" style="padding:18px">
             ${sv(IP.user,44)}
-            <p class="muted" style="margin:8px 0">Bạn chưa thêm ai. Chia sẻ mã bạn bè hoặc tìm theo tên nhé!</p>
-            <button class="btn pri" data-go-find>Tìm & kết bạn</button>
+            <p class="muted" style="margin:8px 0">Bạn chưa có bạn bè chính thức. Vào <b>Cộng đồng</b> để tìm bạn theo tên/mã và gửi lời mời kết bạn nhé!</p>
+            <button class="btn pri" data-go-find>Tìm & kết bạn ngay</button>
           </div>`;
-          body.querySelector('[data-go-find]').onclick=()=>{ tab='find'; render(); };
+          body.querySelector('[data-open-req]').onclick=()=>{ tab='pending'; render(); };
+          body.querySelector('[data-go-blk]').onclick=()=>{ tab='blocked'; render(); };
+          body.querySelectorAll('[data-go-find]').forEach(b=>b.onclick=()=>{ focusFind=true; tab='global'; render(); });
           return;
         }
-        body.innerHTML=`<div class="soc-grid">${list.map(f=>`<div class="li card">
-          ${avHTML(f,42)}
-          <div class="grow" style="min-width:0">
-            <div class="t">${U.esc(f.name)}</div>
-            <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:3px">
-              <span class="tag moss">${sv(IP.moon,12)} ${f.sleep_streak||0} ngày</span>
-              <span class="tag">${sv(IP.gem,12)} ${f.gems||0}</span>
-              ${f.screen_day===Core.s.day?`<span class="tag">${sv(IP.phone,12)} ${f.screen_today}p</span>`:''}
+        body.innerHTML=`${topTools}<div class="soc-grid">${list.map(f=>`<div class="fr-card card">
+          <div class="row">
+            ${avHTML(f,42)}
+            <div class="grow" style="min-width:0">
+              <div class="t" style="font-weight:800;font-size:15px">${U.esc(f.name)}</div>
+              <div class="row" style="gap:4px;flex-wrap:wrap;margin-top:3px">
+                <span class="tag moss">${sv(IP.moon,12)} ${f.sleep_streak||0} ngày</span>
+                <span class="tag">${sv(IP.gem,12)} ${f.gems||0}</span>
+                ${f.screen_day===Core.s.day?`<span class="tag">${sv(IP.phone,12)} ${f.screen_today}p</span>`:''}
+              </div>
             </div>
           </div>
-          <div class="col" style="gap:5px">
-            <button class="btn sm" data-v="${f.id}">${sv(IP.home,15)} Thăm</button>
-            <button class="btn sm pri" data-c="${f.id}">${sv(IP.chat,15)} Chat</button>
+          <div class="fr-acts">
+            <button class="btn sm grow" data-v="${f.id}">${sv(IP.home,14)} Thăm</button>
+            <button class="btn sm pri grow" data-c="${f.id}">${sv(IP.chat,14)} Chat</button>
+            <button class="btn sm" data-unfr="${f.id}" data-nm="${U.esc(f.name)}">${sv(IP.x,13)} Xóa bạn</button>
+            <button class="btn sm rose" data-blk="${f.id}" data-nm="${U.esc(f.name)}">${sv(IP.ban,14)} Chặn</button>
           </div>
         </div>`).join('')}</div>`;
         fixAvatars(body);
-        body.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>visitUser(list.find(x=>x.id===b.dataset.v)));
+        body.querySelector('[data-open-req]').onclick=()=>{ tab='pending'; render(); };
+        body.querySelector('[data-go-blk]').onclick=()=>{ tab='blocked'; render(); };
+        body.querySelectorAll('[data-go-find]').forEach(b=>b.onclick=()=>{ focusFind=true; tab='global'; render(); });
+        body.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>visitUser(list.find(x=>x.id===b.dataset.v),render));
         body.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>openDM(list.find(x=>x.id===b.dataset.c)));
+        body.querySelectorAll('[data-unfr]').forEach(b=>b.onclick=()=>confirmSocialAction({
+          title:`Xóa bạn ${U.esc(b.dataset.nm)}?`,
+          body:'Hai bạn sẽ không còn trong danh sách bạn bè nữa. Sau này bạn vẫn có thể kết bạn lại.',
+          okLabel:'Xóa bạn', okCls:'rose',
+          onOk:async()=>{ await Cloud.removeFriend(b.dataset.unfr); UI.toast(`Đã xóa ${U.esc(b.dataset.nm)} khỏi danh sách bạn bè`); render(); }
+        }));
+        body.querySelectorAll('[data-blk]').forEach(b=>b.onclick=()=>confirmSocialAction({
+          title:`Chặn ${U.esc(b.dataset.nm)}?`,
+          body:'Chặn sẽ tự động xóa bạn, ẩn tin nhắn và ngăn người này gửi lời mời kết bạn cho bạn.',
+          okLabel:'Chặn ngay', okCls:'rose',
+          onOk:async()=>{ await Cloud.block(b.dataset.blk); UI.toast(`Đã chặn ${U.esc(b.dataset.nm)}`); render(); }
+        }));
       }catch(e){ body.innerHTML=`<p class="muted center">Lỗi tải bạn bè: ${U.esc(e.message)}</p>`; }
       return;
     }
 
-    /* tab === 'find' */
-    const code=(Cloud.profile&&Cloud.profile.friend_code)||'------';
-    body.innerHTML=`<div class="card row" style="padding:10px 12px;margin-bottom:10px;background:#e4ecd2">
-        <div class="grow"><div class="muted">Mã bạn bè của bạn</div><b style="font-size:20px;letter-spacing:2px;color:${C.mn}">${U.esc(code)}</b></div>
-        <button class="btn sm" id="cpCode">${sv(IP.copy,16)} Sao chép</button>
-      </div>
-      <div class="row" style="margin-bottom:10px">
-        <input class="inp" id="fSearch" placeholder="Nhập tên hoặc mã 6 ký tự..." maxlength="24">
-        <button class="btn pri" id="fGo">${sv(IP.search,18)}</button>
-      </div>
-      <div id="fRes"><p class="muted center">Nhập ít nhất 2 ký tự để tìm người chơi thật.</p></div>`;
-    body.querySelector('#cpCode').onclick=()=>copyText(code,'Đã sao chép mã bạn bè: '+code);
-    const runSearch=async()=>{
-      const q=body.querySelector('#fSearch').value.trim(), res=body.querySelector('#fRes');
-      if(q.length<2){ res.innerHTML='<p class="muted center">Nhập ít nhất 2 ký tự nhé.</p>'; return; }
-      res.innerHTML='<p class="muted center">Đang tìm...</p>';
-      try{
-        const rows=await Cloud.search(q);
-        if(!rows.length){ res.innerHTML='<p class="muted center">Không tìm thấy ai khớp từ khóa này.</p>'; return; }
-        res.innerHTML=rows.map(p=>{
-          const fr=Cloud.friendIds.includes(p.id);
-          return `<div class="li card">${avHTML(p,40)}
-            <div class="grow" style="min-width:0"><div class="t">${U.esc(p.name)}</div>
-              <div class="muted">Mã ${U.esc(p.friend_code||'')} • ${p.gems||0} Gem • ngủ ${p.sleep_streak||0} ngày</div></div>
-            ${fr?'<span class="tag moss">Bạn bè</span>':`<button class="btn sm pri" data-add="${p.id}">${sv(IP.plus,14)} Kết bạn</button>`}
+    if(tab==='pending'){
+      await renderRequestsBoard(body,render);
+      return;
+    }
+
+    /* tab === 'blocked' */
+    body.innerHTML='<p class="muted center">Đang tải danh sách đã chặn...</p>';
+    try{
+      const rows=await Cloud.blockedProfiles();
+      const byId=Object.fromEntries(rows.map(p=>[p.id,p]));
+      const ids=Cloud.blocked.slice();
+      if(!ids.length){
+        body.innerHTML=`<div class="card center" style="padding:18px">
+          ${sv(IP.shield,42)}
+          <b style="display:block;margin-top:6px">Danh sách chặn đang trống</b>
+          <p class="muted" style="margin-top:4px">Khi bạn chặn ai đó, họ sẽ tự động bị xóa khỏi danh sách bạn bè, ẩn tin nhắn và xuất hiện tại đây để bạn có thể bỏ chặn bất cứ lúc nào.</p>
+        </div>`;
+        return;
+      }
+      body.innerHTML=`<p class="muted" style="margin-bottom:8px">Những người bạn đã chặn sẽ không hiển thị trong chat, bạn bè hay bảng xếp hạng của bạn:</p>
+        <div class="col">${ids.map(id=>{
+          const p=byId[id]||{id,name:'Người dùng đã chặn',friend_code:'—'};
+          return `<div class="li card tint-rose">
+            ${avHTML(p,40)}
+            <div class="grow" style="min-width:0">
+              <div class="t">${U.esc(p.name)}</div>
+              <div class="muted">Mã ${U.esc(p.friend_code||'—')} • Đang bị chặn</div>
+            </div>
+            <button class="btn sm moss" data-unblk="${id}" data-nm="${U.esc(p.name)}">${sv(IP.shield,14)} Bỏ chặn</button>
           </div>`;
-        }).join('');
-        fixAvatars(res);
-        res.querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{
-          b.disabled=true;
-          try{ await Cloud.addFriend(b.dataset.add); b.outerHTML='<span class="tag moss">Đã thêm ✓</span>'; UI.toast('Đã thêm bạn bè!'); }
-          catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
-        });
-      }catch(e){ res.innerHTML=`<p class="muted center">Lỗi tìm kiếm: ${U.esc(e.message)}</p>`; }
-    };
-    body.querySelector('#fGo').onclick=runSearch;
-    body.querySelector('#fSearch').onkeydown=e=>{ if(e.key==='Enter') runSearch(); };
+        }).join('')}</div>`;
+      fixAvatars(body);
+      body.querySelectorAll('[data-unblk]').forEach(b=>b.onclick=async()=>{
+        b.disabled=true;
+        try{ await Cloud.unblock(b.dataset.unblk); UI.toast(`Đã bỏ chặn ${U.esc(b.dataset.nm)}`); render(); }
+        catch(e){ b.disabled=false; UI.toast('Lỗi: '+e.message); }
+      });
+    }catch(e){ body.innerHTML=`<p class="muted center">Lỗi tải danh sách chặn: ${U.esc(e.message)}</p>`; }
   };
 
   render();
@@ -336,7 +668,7 @@ function openLeaderboard(){
           <div class="rank">${i<3?`<svg width="28" height="28" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="${medal[i]}" stroke="${C.dg}" stroke-width="2"/><text x="15" y="20" text-anchor="middle" font-size="13" font-weight="800" fill="${C.dg}" font-family="Baloo 2,sans-serif">${i+1}</text></svg>`:i+1}</div>
           ${avHTML(p,38)}
           <b class="grow" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${U.esc(p.name)}${me?' (Bạn)':''}</b>
-          <b style="color:${C.mn};font-size:15px;white-space:nowrap">${val}</b>
+          <b class="txt-accent" style="font-size:15px;white-space:nowrap">${val}</b>
         </div>`;
       }).join('');
       fixAvatars(box);
@@ -350,26 +682,54 @@ function openLeaderboard(){
   sh.track(Cloud.on('auth',render));
 }
 
-/* ---------------- Túi đồ / Phụ kiện ---------------- */
+/* ---------------- Túi đồ / Phụ kiện / Ngoại thất nhà / Theme ---------------- */
 function openBag(){
-  const sh=UI.sheet({title:'Túi Đồ / Decor',icon:'bag'}); let tab='acc';
-  sh.body.innerHTML=`<div id="bagDk" style="position:relative;height:118px;margin-top:-6px"></div><div id="bagC"></div>`;
+  const sh=UI.sheet({title:'Túi Đồ • Nhà • Giao Diện',icon:'bag',cls:'wide'}); let tab='acc';
+  sh.body.innerHTML=`<div id="bagDk" style="position:relative;height:114px;margin-top:-6px"></div><div id="bagC"></div>`;
   const dkWrap=sh.body.querySelector('#bagDk');
-  const dk=new Donkey({scale:1.3,tilt:-16,yaw:24,acc:Core.s.acc.on,mood:Core.mood()});
+  const dk=new Donkey({scale:1.25,tilt:-16,yaw:24,acc:Core.s.acc.on,mood:Core.mood()});
   dkWrap.appendChild(dk.el);
-  const placeDk=()=>dk.pos((dkWrap.clientWidth||320)/2,110);
+  const placeDk=()=>dk.pos((dkWrap.clientWidth||320)/2,106);
   requestAnimationFrame(placeDk);
   const ro=new ResizeObserver(placeDk); ro.observe(dkWrap); sh.track(()=>ro.disconnect());
 
   const render=()=>{ const s=Core.s, c=sh.body.querySelector('#bagC'); dk.setAcc(s.acc.on);
-    c.innerHTML=`<div class="seg" style="margin-bottom:10px"><button class="${tab==='acc'?'on':''}" data-k="acc">Phụ kiện</button><button class="${tab==='box'?'on':''}" data-k="box">Hộp nội thất (${s.decor.boxes.length})</button></div>`+
-      (tab==='acc'?`<div class="grid3">${Object.entries(DATA.ACCS).map(([id,a])=>{ const own=s.acc.owned.includes(id), on=s.acc.on.includes(id);
-        return `<div class="pet-card card" style="${on?'background:#e1e9c9':''}">${sv(IP[id],44)}<span style="font-size:12px">${a.name}</span>${own?`<button class="btn sm ${on?'pri':''}" data-t="${id}">${on?'Đang đeo':'Đeo'}</button>`:`<button class="btn sm rose" data-b="${id}">${sv(IP.gem,13)} ${a.price}</button>`}</div>`; }).join('')}</div><p class="muted center" style="margin-top:8px">Phụ kiện hiển thị trên chú lừa Voxel ở mọi màn hình.</p>`
-      :`${s.decor.boxes.length?s.decor.boxes.map(b=>`<div class="li card">${sv(IP.box,36)}<b class="grow">${DATA.DECOR[b.id].name}</b><span class="tag">Chưa mở</span></div>`).join(''):'<p class="muted center">Chưa có hộp nào. Mua nội thất bằng Gem trong nhà nhé!</p>'}`)+
-      `<button class="btn pri full" style="margin-top:10px" data-a="decor">${sv(IP.home,22)} Vào nhà trang trí (Decor)</button>`;
+    let inner='';
+    if(tab==='acc'){
+      inner=`<div class="grid3">${Object.entries(DATA.ACCS).map(([id,a])=>{ const own=s.acc.owned.includes(id), on=s.acc.on.includes(id);
+        return `<div class="pet-card card ${on?'tint-active':''}">${sv(IP[id],44)}<span style="font-size:12px">${a.name}</span>${own?`<button class="btn sm ${on?'pri':''}" data-t="${id}">${on?'Đang đeo':'Đeo'}</button>`:`<button class="btn sm rose" data-b="${id}">${sv(IP.gem,13)} ${a.price}</button>`}</div>`; }).join('')}</div><p class="muted center" style="margin-top:8px">Phụ kiện hiển thị trên chú lừa Voxel ở mọi màn hình.</p>`;
+    } else if(tab==='houses'){
+      const D=s.decor;
+      inner=`<div class="grid2">${Object.entries(DATA.HOUSES).map(([id,h])=>{
+        const own=D.housesOwned.includes(id), on=D.house===id;
+        return `<div class="pet-card card ${on?'tint-active':''}" style="padding:8px 6px;${on?'border-color:var(--accent)':''}">
+          <div class="house-mini">${typeof SCENE!=='undefined'?SCENE.houseOf(id):sv(IP.home,48)}</div>
+          <b style="font-size:13px">${h.name}</b>
+          <span class="muted" style="font-size:11px">${h.size} • ${h.theme}${h.comfort?` • +${h.comfort} ấm cúng`:''}</span>
+          ${on?'<span class="tag moss">Đang ở ✓</span>':own?`<button class="btn sm pri" data-hb="${id}">Chọn nhà</button>`:`<button class="btn sm rose" data-hb="${id}">${sv(IP.gem,13)} ${h.price}</button>`}
+        </div>`;
+      }).join('')}</div>`;
+    } else if(tab==='theme'){
+      inner=`<p class="muted" style="margin-bottom:8px">Đổi màu giao diện <b>miễn phí 100%</b> — lấy cảm hứng từ bảng màu dịu mắt của Lừa Chill:</p>${themePickerHTML()}`;
+    } else {
+      inner=`${s.decor.boxes.length?s.decor.boxes.map(b=>`<div class="li card">${sv(IP.box,36)}<b class="grow">${DATA.DECOR[b.id].name}</b><span class="tag">Chưa mở</span></div>`).join(''):'<p class="muted center">Chưa có hộp nào. Mua nội thất bằng Gem trong nhà nhé!</p>'}`;
+    }
+    c.innerHTML=`<div class="seg" style="margin-bottom:10px">
+        <button class="${tab==='acc'?'on':''}" data-k="acc">Phụ kiện</button>
+        <button class="${tab==='houses'?'on':''}" data-k="houses">Ngoại thất</button>
+        <button class="${tab==='theme'?'on':''}" data-k="theme">Theme Free</button>
+        <button class="${tab==='box'?'on':''}" data-k="box">Hộp (${s.decor.boxes.length})</button>
+      </div>${inner}
+      <button class="btn pri full" style="margin-top:10px" data-a="decor">${sv(IP.home,20)} Vào nhà mở rộng & trang trí</button>`;
     c.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{ tab=b.dataset.k; render(); });
     c.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ Core.toggleAcc(b.dataset.t); render(); });
     c.querySelectorAll('[data-b]').forEach(b=>b.onclick=()=>{ if(Core.buyAcc(b.dataset.b)) UI.toast(`Đã mua ${DATA.ACCS[b.dataset.b].name}!`); else UI.toast('Chưa đủ Gem'); render(); });
+    c.querySelectorAll('[data-hb]').forEach(b=>b.onclick=()=>{
+      const id=b.dataset.hb, h=DATA.HOUSES[id], r=Core.buyHouse(id);
+      if(r.ok){ UI.toast(r.bought?`Chúc mừng mua ${h.name}!`:`Đã đổi sang ${h.name}!`); render(); }
+      else UI.toast(r.msg);
+    });
+    bindThemePicker(c,render);
     c.querySelector('[data-a=decor]').onclick=()=>{ sh.close(); Nav.go('tycoon'); }; };
   render();
 }

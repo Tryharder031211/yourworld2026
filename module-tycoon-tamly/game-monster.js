@@ -11,7 +11,7 @@ const MonsterGame={
   BAD:['Sale 90%!','99+ thông báo','Trend mới!!','Bạn bè đang online','Flash sale 0đ','Livestream hot','Ai cũng có rồi','Còn 2 suất cuối'],
   init(){ const el=this.el=document.getElementById('monster'); if(!el) return; Object.assign(this,{items:[],pops:[],meter:0,chomp:0,t:0,score:0,playing:false});
     el.innerHTML=`<div class="mon-hud card"><div class="row"><button class="icon-btn" data-a="back" style="width:34px;height:34px;border-radius:10px">${sv(IP.back,20)}</button>
-        <b class="grow" style="font-size:15px;color:${C.mn}">Quái Vật Ăn Thịt FOMO</b><span class="tag">${sv(IP.clock,13)} <b id="mnT">45</b>s</span><span class="tag moss">${sv(IP.star,13)} <b id="mnS">0</b></span></div>
+        <b class="grow txt-accent" style="font-size:15px">Quái Vật Ăn Thịt FOMO</b><span class="tag">${sv(IP.clock,13)} <b id="mnT">45</b>s</span><span class="tag moss">${sv(IP.star,13)} <b id="mnS">0</b></span></div>
         <div class="row" style="margin-top:5px;gap:6px"><b style="font-size:11px">${sv(IP.notif,14)} FOMO</b><div class="bar grow" style="height:11px"><i id="mnB" style="width:0"></i></div><b id="mnP" style="font-size:11px;width:34px;text-align:right">0%</b></div></div>
       <div class="mon-stage" id="mnStage"><div class="world" id="mnW"><canvas id="mnC"></canvas></div></div>`;
     this.stage=el.querySelector('#mnStage'); this.world=el.querySelector('#mnW'); this.cv=el.querySelector('#mnC'); this.ctx=this.cv.getContext('2d');
@@ -31,10 +31,10 @@ const MonsterGame={
     st.addEventListener('pointermove',e=>{ if(this.down&&this.playing) go(e,false); });
     const up=()=>{ this.down=false; }; st.addEventListener('pointerup',up); st.addEventListener('pointercancel',up); },
   open(){ App.show('monster'); this.resize(); this.dk.setAcc(Core.s.acc.on); this.reset(); this.draw();
-    const m=UI.modal(`<div class="center">${sv(IP.monster,90)}<h2 style="color:${C.mn}">Quái Vật Ăn Thịt FOMO</h2>
+    const m=UI.modal(`<div class="center">${sv(IP.monster,90)}<h2 class="txt-accent">Quái Vật Ăn Thịt FOMO</h2>
       <p style="font-weight:700;margin:6px 0">Chạm / giữ & rê để chú lừa chạy ngang.</p>
-      <div class="grid2" style="text-align:left;margin:8px 0"><div class="card" style="padding:8px;background:#e1e9c9"><b>GOM thói quen tốt</b><div class="muted">Nước, sách, vận động, ngủ sớm... +10 điểm & làm Quái vật teo lại</div></div>
-      <div class="card" style="padding:8px;background:#f3e0dc"><b>NÉ mồi FOMO</b><div class="muted">Thông báo, sale sốc, trend... bắt phải là Quái vật lớn thêm!</div></div></div>
+      <div class="grid2" style="text-align:left;margin:8px 0"><div class="card tint-active" style="padding:8px"><b>GOM thói quen tốt</b><div class="muted">Nước, sách, vận động, ngủ sớm... +10 điểm & làm Quái vật teo lại</div></div>
+      <div class="card tint-rose" style="padding:8px"><b>NÉ mồi FOMO</b><div class="muted">Thông báo, sale sốc, trend... bắt phải là Quái vật lớn thêm!</div></div></div>
       <p class="muted">Trụ ${this.DUR} giây mà thanh FOMO chưa đầy là THẮNG. Kỷ lục: <b>${Core.s.monster.best}</b></p>
       <button class="btn pri big full" data-a="go" style="margin-top:8px">Bắt đầu!</button></div>`,{dismiss:false});
     m.box.querySelector('[data-a=go]').onclick=()=>{ m.close(); this.playing=true; }; },

@@ -1,0 +1,73 @@
+{
+  "name": "lua-chill-desktop",
+  "version": "2.2.0",
+  "description": "Lừa Chill Desktop App (Electron) — Đo thời gian màn hình thật, khóa 3 chế độ (Lockdown / Từng app / Nhóm app), nhắc hẹn chạy nền & đăng nhập Google/Discord cho Windows/macOS/Linux.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win portable nsis",
+    "build:win-portable": "electron-builder --win portable",
+    "build:mac": "electron-builder --mac dmg",
+    "build:linux": "electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.luachill.desktop",
+    "productName": "Lua Chill",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "monitor.js",
+      "reminders.js",
+      "preload.js",
+      "lock-preload.js",
+      "lock-overlay.html",
+      "lock-overlay.js",
+      "assets/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "../index.html", "to": "www/index.html" },
+      { "from": "../config.js", "to": "www/config.js" },
+      { "from": "../pwa.webmanifest", "to": "www/pwa.webmanifest" },
+      { "from": "../sw.js", "to": "www/sw.js" },
+      { "from": "../assets", "to": "www/assets" },
+      { "from": "../core", "to": "www/core" },
+      { "from": "../module-suc-khoe", "to": "www/module-suc-khoe" },
+      { "from": "../module-tycoon-tamly", "to": "www/module-tycoon-tamly" }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "portable": {
+      "artifactName": "LuaChill-Portable-${version}.exe"
+    },
+    "nsis": {
+      "artifactName": "LuaChill-Setup-${version}.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lừa Chill"
+    },
+    "mac": {
+      "icon": "assets/icon.png",
+      "category": "public.app-category.lifestyle",
+      "target": ["dmg"]
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "target": ["AppImage"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Biểu tượng đơn sắc trắng chuẩn Android Status Bar (evenOdd tạo mắt & miệng rõ nét) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M7,9 L5,3 L10,7 H14 L19,3 L17,9 A4,4 0 0,1 20,13 V17 A4,4 0 0,1 16,21 H8 A4,4 0 0,1 4,17 V13 A4,4 0 0,1 7,9 Z M8.2,12.8 A1.3,1.3 0 1,0 10.8,12.8 A1.3,1.3 0 1,0 8.2,12.8 Z M13.2,12.8 A1.3,1.3 0 1,0 15.8,12.8 A1.3,1.3 0 1,0 13.2,12.8 Z M9.2,16.8 H14.8 A0.8,0.8 0 0,1 14.8,18.4 H9.2 A0.8,0.8 0 0,1 9.2,16.8 Z" />
+</vector>

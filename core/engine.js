@@ -1,8 +1,13 @@
 /* =============================================================================
    core/engine.js — [CORE ENGINE] thuần logic & state, KHÔNG chạm DOM.
-   Có thể port 1-1 sang Rust (Tauri v2 #[tauri::command]) hoặc chạy trong service worker.
+   • Hỗ trợ đồng hồ theo vị trí / GPS / múi giờ IANA / chỉnh giờ thủ công.
+   • 3 chế độ chặn tùy chỉnh: Lockdown (khóa tất cả chừa 3 app khẩn cấp) • Từng app • Nhóm app.
+   • Nhắc hẹn thông minh: Nhiệm vụ • Điểm danh • Giờ ngủ • Giờ dậy • Gần hết giới hạn.
+   • Cầu nối native: Android (Kotlin + Accessibility + Draw-Over-Apps + UsageStats + AlarmManager),
+     Chrome Extension (MV3), Electron Desktop (Windows/macOS/Linux), và Web/PWA.
    ============================================================================= */
 'use strict';
+
 const U = {
   clamp:(v,a=0,b=100)=>Math.max(a,Math.min(b,v)),
   lerp:(a,b,t)=>a+(b-a)*t,
@@ -13,7 +18,6 @@ const U = {
   pad:n=>String(n).padStart(2,'0'),
   vnd:n=>{const s=Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.');return (n<0?'-':'')+s+'đ'},
   ymd:d=>d.getFullYear()+'-'+U.pad(d.getMonth()+1)+'-'+U.pad(d.getDate()),
-  /* "ngày game" bắt đầu lúc thức dậy: 01:30 sáng vẫn tính là đêm của hôm trước */
   dayKeyAt:(d,shiftH)=>U.ymd(new Date(d.getTime()-shiftH*3600e3)),
   addDays:(k,n)=>{const [y,m,d]=k.split('-').map(Number);return U.ymd(new Date(y,m-1,d+n));},
   hm:d=>U.pad(d.getHours())+':'+U.pad(d.getMinutes()),
@@ -21,6 +25,49 @@ const U = {
   hToHm:h=>{h=((h%24)+24)%24;return U.pad(Math.floor(h))+':'+U.pad(Math.round((h%1)*60)%60);},
   angDiff:(a,b)=>((b-a)%360+540)%360-180,
   esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+};
+
+/* ---------- Tiện ích Múi giờ & Vị trí (hoạt động hoàn toàn offline + có quét GPS/IP) ---------- */
+const ClockUtil = {
+  deviceTz(){ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Ho_Chi_Minh'; }catch(e){ return 'Asia/Ho_Chi_Minh'; } },
+  /* Tính độ lệch (ms) giữa múi giờ IANA `tz` và giờ cục bộ của trình duyệt tại thời điểm `date` */
+  tzShiftMs(tz, date=new Date()){
+    try{
+      const fmt=new Intl.DateTimeFormat('en-US',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+      const ps=Object.fromEntries(fmt.formatToParts(date).map(p=>[p.type,p.value]));
+      const h=ps.hour==='24'?0:+ps.hour;
+      const wall=new Date(+ps.year,+ps.month-1,+ps.day,h,+ps.minute,+ps.second);
+      return Math.round((wall.getTime()-date.getTime())/60000)*60000;
+    }catch(e){ return 0; }
+  },
+  dateInTz(date, tz){ return new Date(date.getTime()+this.tzShiftMs(tz,date)); },
+  utcLabel(tz){
+    try{
+      const s=new Intl.DateTimeFormat('en-US',{timeZone:tz,timeZoneName:'shortOffset'}).formatToParts(new Date()).find(p=>p.type==='timeZoneName');
+      return s?s.value.replace('GMT','UTC'):'UTC';
+    }catch(e){ return 'UTC'; }
+  },
+  allTimezones(){
+    try{ if(typeof Intl.supportedValuesOf==='function') return Intl.supportedValuesOf('timeZone'); }catch(e){}
+    return DATA.TIMEZONES.map(x=>x.tz);
+  },
+  /* Ước lượng múi giờ dự phòng từ tọa độ GPS khi mất mạng */
+  guessTzByCoords(lat, lon){
+    if(lat>=8&&lat<=24&&lon>=102&&lon<=110) return {tz:'Asia/Ho_Chi_Minh',region:'Việt Nam (GPS)'};
+    if(lat>=5&&lat<=21&&lon>=97&&lon<=106) return {tz:'Asia/Bangkok',region:'Đông Nam Á (GPS)'};
+    if(lat>=1&&lat<=7&&lon>=100&&lon<=105) return {tz:'Asia/Singapore',region:'Singapore / Malaysia (GPS)'};
+    if(lat>=24&&lat<=46&&lon>=123&&lon<=146) return {tz:'Asia/Tokyo',region:'Nhật Bản (GPS)'};
+    if(lat>=33&&lat<=39&&lon>=124&&lon<=131) return {tz:'Asia/Seoul',region:'Hàn Quốc (GPS)'};
+    const off=Math.max(-12,Math.min(14,Math.round(lon/15)));
+    const map={'7':'Asia/Ho_Chi_Minh','8':'Asia/Singapore','9':'Asia/Tokyo','10':'Australia/Sydney','0':'Europe/London','1':'Europe/Paris','-5':'America/New_York','-8':'America/Los_Angeles'};
+    const tz=map[String(off)]||(off===0?'UTC':`Etc/GMT${off>0?'-'+off:'+'+Math.abs(off)}`);
+    return {tz,region:`Tọa độ ${lat.toFixed(2)}, ${lon.toFixed(2)} (UTC${off>=0?'+':''}${off})`};
+  },
+  async fetchJson(url, ms=3500){
+    const ac=new AbortController(), t=setTimeout(()=>ac.abort(),ms);
+    try{ const r=await fetch(url,{signal:ac.signal}); if(!r.ok) throw new Error(r.status); return await r.json(); }
+    finally{ clearTimeout(t); }
+  }
 };
 
 const DATA = {
@@ -39,19 +86,72 @@ const DATA = {
   PETS:{ dog:{name:'Cún Mochi',price:0}, cat:{name:'Mèo Mướp',price:120}, rabbit:{name:'Thỏ Bông',price:180}, capy:{name:'Capybara Bơ',price:250} },
   ACCS:{ scarf:{name:'Khăn quàng cổ',price:80}, beanie:{name:'Mũ len',price:80}, headphones:{name:'Tai nghe',price:100} },
   DECOR:{
-    bed:{name:'Giường gỗ',price:120,w:1,d:2,comfort:12}, desk:{name:'Bàn học',price:90,w:1,d:1,comfort:8},
-    shelf:{name:'Kệ sách',price:80,w:1,d:1,comfort:8}, plant:{name:'Chậu cây',price:30,w:1,d:1,comfort:4},
-    lamp:{name:'Đèn ngủ',price:40,w:1,d:1,comfort:4}, beanbag:{name:'Ghế lười',price:60,w:1,d:1,comfort:6},
-    rug:{name:'Thảm tròn',price:50,w:2,d:2,flat:true,comfort:5}, wardrobe:{name:'Tủ quần áo',price:110,w:1,d:1,comfort:9},
-    tank:{name:'Bể cá mini',price:70,w:1,d:1,comfort:7}, guitar:{name:'Đàn guitar',price:65,w:1,d:1,comfort:6}
+    bed:     {name:'Giường gỗ',    price:120,w:1,d:2,comfort:12,cat:'bedroom'},
+    desk:    {name:'Bàn học',      price:90, w:1,d:1,comfort:8, cat:'bedroom'},
+    wardrobe:{name:'Tủ quần áo',   price:110,w:1,d:1,comfort:9, cat:'bedroom'},
+    lamp:    {name:'Đèn ngủ',      price:40, w:1,d:1,comfort:4, cat:'bedroom'},
+    sofa:    {name:'Ghế sofa',     price:130,w:2,d:1,comfort:14,cat:'living'},
+    tv:      {name:'Tivi & kệ',    price:150,w:2,d:1,comfort:16,cat:'living'},
+    ctable:  {name:'Bàn trà',      price:55, w:1,d:1,comfort:6, cat:'living'},
+    shelf:   {name:'Kệ sách',      price:80, w:1,d:1,comfort:8, cat:'living'},
+    plant:   {name:'Chậu cây',     price:30, w:1,d:1,comfort:4, cat:'living'},
+    beanbag: {name:'Ghế lười',     price:60, w:1,d:1,comfort:6, cat:'living'},
+    rug:     {name:'Thảm tròn',    price:50, w:2,d:2,flat:true,comfort:5,cat:'living'},
+    tank:    {name:'Bể cá mini',   price:70, w:1,d:1,comfort:7, cat:'living'},
+    fridge:  {name:'Tủ lạnh',      price:120,w:1,d:1,comfort:12,cat:'kitchen'},
+    stove:   {name:'Bếp nấu',      price:140,w:2,d:1,comfort:14,cat:'kitchen'},
+    dtable:  {name:'Bàn ăn',       price:95, w:1,d:2,comfort:10,cat:'kitchen'},
+    tub:     {name:'Bồn tắm bọt',  price:160,w:2,d:1,comfort:16,cat:'bathroom'},
+    sink:    {name:'Bồn rửa mặt',  price:85, w:1,d:1,comfort:9, cat:'bathroom'},
+    toilet:  {name:'Bồn cầu gọn',  price:70, w:1,d:1,comfort:7, cat:'bathroom'},
+    pc:      {name:'Góc PC Gaming',price:180,w:2,d:1,comfort:18,cat:'gaming'},
+    gchair:  {name:'Ghế Gaming',   price:95, w:1,d:1,comfort:10,cat:'gaming'},
+    arcade:  {name:'Máy Game Thùng',price:145,w:1,d:1,comfort:15,cat:'gaming'},
+    guitar:  {name:'Đàn guitar',   price:65, w:1,d:1,comfort:6, cat:'gaming'}
   },
+  ROOMS:{
+    bedroom: {name:'Phòng ngủ',       price:0,  wall:'#F7F4D5',floor:'#c99a6b',desc:'Không gian nghỉ ngơi ấm áp mặc định'},
+    living:  {name:'Phòng khách',     price:180,wall:'#dfe6c8',floor:'#efe6c4',desc:'Đặt TV, ghế sofa, bàn trà tiếp bạn bè'},
+    kitchen: {name:'Nhà bếp',         price:200,wall:'#e8dcc0',floor:'#d9b0a8',desc:'Tủ lạnh, bếp nấu & bàn ăn ấm cúng'},
+    bathroom:{name:'Phòng tắm',       price:220,wall:'#b9d3d6',floor:'#7fa3ab',desc:'Bồn tắm bọt, bồn rửa & góc spa'},
+    gaming:  {name:'Phòng chơi game', price:260,wall:'#cfd9b4',floor:'#b5a28a',desc:'Góc PC Gaming, ghế gaming & máy thùng'}
+  },
+  HOUSES:{
+    mushroom:  {name:'Nhà Nấm Cổ Điển',    size:'Nhỏ',    theme:'Cổ tích',   price:0,  comfort:0, desc:'Ngôi nhà mái nấm ấm cúng khởi đầu'},
+    cottage:   {name:'Nhà Gỗ Mái Ngói',    size:'Nhỏ',    theme:'Đồng quê',  price:180,comfort:10,desc:'Mái ngói hồng đất, ống khói & bồn hoa'},
+    greenhouse:{name:'Nhà Kính Vườn Xanh', size:'Vừa',    theme:'Thực vật',  price:260,comfort:18,desc:'Nhà kính tràn nắng & cây xanh mát mắt'},
+    japanese:  {name:'Nhà Trà Đạo Zen',    size:'Vừa',    theme:'Nhật Bản',  price:340,comfort:24,desc:'Mái ngói cong, cửa shoji & đèn lồng ấm'},
+    treehouse: {name:'Nhà Trên Cây Cổ Thụ',size:'Lớn',    theme:'Rừng xanh', price:450,comfort:32,desc:'Nhà gỗ trên tán cây kèm ban công & thang dây'},
+    villa:     {name:'Biệt Thự Đồi Xanh',  size:'Rất lớn',theme:'Sang trọng',price:600,comfort:45,desc:'Biệt thự 2 tầng sang trọng, ban công & cửa đôi'}
+  },
+  THEMES:[
+    {id:'classic', name:'Cổ Điển (Beige & Moss)',desc:'Bảng màu chuẩn ấm áp mặc định',     sw:['#F7F4D5','#839958','#D3968C','#105666','#0A3323'], dsw:['#142a22','#203f33','#839958','#D3968C','#F7F4D5']},
+    {id:'matcha',  name:'Rừng Matcha',           desc:'Xanh rêu dịu mắt tràn sức sống',    sw:['#e7eed8','#839958','#D3968C','#105666','#0A3323'], dsw:['#162b1f','#234230','#97b264','#D3968C','#F7F4D5']},
+    {id:'rosy',    name:'Bình Minh Hồng Đào',    desc:'Kem hồng đất nhẹ nhàng, ngọt ngào', sw:['#f6e9e4','#D3968C','#839958','#105666','#0A3323'], dsw:['#281e21','#3c2b30','#D3968C','#839958','#F7F4D5']},
+    {id:'midnight',name:'Biển Đêm Thanh Mát',    desc:'Lam xanh Midnight tập trung thư thái',sw:['#ddebee','#105666','#839958','#D3968C','#0A3323'], dsw:['#0d262e','#153a46','#8cd1de','#839958','#F7F4D5']},
+    {id:'sunset',  name:'Cát Hoàng Hôn',         desc:'Vàng kem ấm áp dịu nhẹ cuối chiều', sw:['#f5ebd2','#D3968C','#105666','#839958','#0A3323'], dsw:['#292218','#3d3222','#e0a889','#839958','#F7F4D5']},
+    {id:'forest',  name:'Rừng Sâu Cổ Thụ',       desc:'Xanh lá rừng trầm ổn, dịu mắt',     sw:['#dce6d5','#0A3323','#839958','#105666','#D3968C'], dsw:['#0c2920','#143c30','#839958','#8cd1de','#F7F4D5']}
+  ],
   WALLS:['#F7F4D5','#dfe6c8','#ecc9c2','#b9d3d6','#e8dcc0','#cfd9b4'],
   FLOORS:['#c99a6b','#a8b98a','#efe6c4','#d9b0a8','#7fa3ab','#b5a28a'],
   PAINT_COST:15,
   BED_OPTIONS:['20:30','21:00','21:30','22:00','22:30','23:00','23:30','00:00','00:30'],
-  SLEEP_HOURS:8,            /* ngủ đủ 8 tiếng: giờ dậy = giờ ngủ + 8h */
-  CHECKIN_WINDOW:8,         /* cửa sổ điểm danh: trong 8 tiếng sau giờ dậy */
-  /* App/web có thể chặn (Chrome Extension & web). Android lấy danh sách app thật từ máy. */
+  SLEEP_HOURS:8,
+  CHECKIN_WINDOW:8,
+  TIMEZONES:[
+    {tz:'Asia/Ho_Chi_Minh', label:'Việt Nam — TP.HCM / Hà Nội'},
+    {tz:'Asia/Bangkok',     label:'Thái Lan — Bangkok'},
+    {tz:'Asia/Singapore',   label:'Singapore / Malaysia'},
+    {tz:'Asia/Tokyo',       label:'Nhật Bản — Tokyo'},
+    {tz:'Asia/Seoul',       label:'Hàn Quốc — Seoul'},
+    {tz:'Asia/Shanghai',    label:'Trung Quốc / Đài Loan'},
+    {tz:'Australia/Sydney', label:'Úc — Sydney'},
+    {tz:'Europe/London',    label:'Anh — London'},
+    {tz:'Europe/Paris',     label:'Pháp / Đức — Paris'},
+    {tz:'America/New_York', label:'Mỹ (Đông) — New York'},
+    {tz:'America/Los_Angeles',label:'Mỹ (Tây) — Los Angeles'},
+    {tz:'UTC',              label:'Giờ quốc tế (UTC)'}
+  ],
   WEB_APPS:[
     {id:'facebook',name:'Facebook',icon:'fb',domains:['facebook.com','fb.com','messenger.com']},
     {id:'tiktok',name:'TikTok',icon:'tiktok',domains:['tiktok.com']},
@@ -64,8 +164,16 @@ const DATA = {
     {id:'lazada',name:'Lazada',icon:'cart',domains:['lazada.vn']},
     {id:'netflix',name:'Netflix',icon:'yt',domains:['netflix.com']}
   ],
-  /* Ưu đãi chăm sóc */
+  DEFAULT_GROUPS:[
+    {id:'social',name:'Mạng xã hội',limit:45,web:['facebook','tiktok','instagram','x','threads'],custom:[],android:[],pc:[]},
+    {id:'video', name:'Video & Phim',limit:60,web:['youtube','netflix'],custom:[],android:[],pc:[]},
+    {id:'shop',  name:'Mua sắm FOMO',limit:20,web:['shopee','lazada'],custom:[],android:[],pc:[]},
+    {id:'game',  name:'Game giải trí',limit:30,web:[],custom:[],android:[],pc:[]}
+  ],
+  MAX_EMERGENCY:3,
+  DEFAULT_APP_LIMIT:30,
   CARE:{golden:30,goldenGem:5,combo:40,streakPct:10,streakMax:5},
+  /* Giữ cho NPC minh họa trong minigame Shopee/Siêu thị (game-trend.js) */
   FRIENDS:[
     {id:'f1',name:'Mèo Mun',animal:'cat',color:'#D3968C',gems:1840,screen:64,quests:41,sleep:'good',streak:12,wall:'#ecc9c2',floor:'#c99a6b',room:[['rug',2,2],['bed',0,1],['plant',4,0],['lamp',0,0],['shelf',2,0]],bio:'Ngủ 22:30 đều đặn 12 ngày liền!'},
     {id:'f2',name:'Gấu Trúc Pi',animal:'panda',color:'#F7F4D5',gems:2310,screen:152,quests:28,sleep:'bad',streak:0,wall:'#dfe6c8',floor:'#b5a28a',room:[['beanbag',1,1],['tank',4,0],['wardrobe',0,0],['guitar',3,3]],bio:'Đang cai TikTok... lần thứ 3 😅'},
@@ -74,10 +182,9 @@ const DATA = {
     {id:'f5',name:'Vịt Vàng',animal:'duck',color:'#f1d77a',gems:720,screen:188,quests:12,sleep:'bad',streak:0,wall:'#e8dcc0',floor:'#d9b0a8',room:[['guitar',0,0],['tank',1,0],['beanbag',2,2]],bio:'Hay thức khuya xem livestream...'},
     {id:'f6',name:'Cú Đêm',animal:'owl',color:'#8a7a9a',gems:1105,screen:131,quests:19,sleep:'bad',streak:1,wall:'#F7F4D5',floor:'#7fa3ab',room:[['desk',0,0],['lamp',1,0],['shelf',0,1],['bed',4,2]],bio:'Đang tập ngủ trước 23h.'}
   ],
-  REPLIES:['Cố lên nha! Hôm nay mình mới dùng máy {m} phút thôi 😎','Ok luôn! Tối nay đúng giờ là tắt máy cùng nhau nhé 🌙','Mình vừa đi bộ 15 phút, chạm cỏ xong rồi nè 🌿','Thi đua thì thi! Ai dùng máy ít hơn tuần này thắng 🏆','Cảm ơn sticker nha, dễ thương quá 💚','Vừa uống ly nước ấm, chill ghê','Mai qua thăm vườn bạn nhé!']
+  REPLIES:[]
 };
 
-/* ---------- Persistence (localStorage dùng chung giữa các trang cùng origin) ---------- */
 const Store = {
   KEY:'lua_chill_save_v1',
   load(){ try{ return JSON.parse(localStorage.getItem(this.KEY)); }catch(e){ return null; } },
@@ -85,76 +192,358 @@ const Store = {
   clear(){ localStorage.removeItem(this.KEY); }
 };
 
-/* ---------- Native Bridge ----------
-   • Android app (android/): window.LuaChillNative — AccessibilityService chặn app thật + UsageStats đo phút thật.
-   • Chrome Extension: ghi "policy" vào chrome.storage.local → background.js chặn web bằng declarativeNetRequest.
-   • Tauri v2: invoke('set_policy').
-   • Web/PWA: chỉ khóa trong app (iOS/iPadOS không cho web chặn app khác).                        */
+/* ---------- Native Bridge: Android • Electron Desktop • Chrome Extension • Tauri • Web ---------- */
 const Bridge = {
   get android(){ return typeof window!=='undefined' && !!window.LuaChillNative; },
+  get electron(){ return typeof window!=='undefined' && !!window.LuaChillDesktop; },
   get ext(){ try{ return typeof chrome!=='undefined' && !!(chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local); }catch(e){ return false; } },
   get tauri(){ return !!(window.__TAURI__ && window.__TAURI__.core); },
-  get canBlock(){ return this.android||this.ext||this.tauri; },
-  mode(){ return this.android?'Android (chặn app thật)':this.ext?'Chrome Extension (chặn web thật)':this.tauri?'Tauri Native':'Web/PWA (chỉ khóa trong app)'; },
+  get canBlock(){ return this.android||this.ext||this.electron||this.tauri; },
+  get realUsage(){ return this.android||this.ext||this.electron; },
+  get nativeApps(){ return this.android||this.electron; },
+  mode(){
+    if(this.android) return 'Android Native Kotlin (đo & chặn app thật + Draw-Over-Apps)';
+    if(this.electron) return 'Desktop PC Electron (đo, chặn 3 chế độ & chạy nền khay hệ thống)';
+    if(this.ext) return 'Chrome Extension (đo & chặn web thật)';
+    if(this.tauri) return 'Tauri Native';
+    return 'Web / PWA (đo phiên trong app)';
+  },
+  getInstalledApps(){
+    if(this.android){ try{ return Promise.resolve(JSON.parse(window.LuaChillNative.getInstalledApps()||'[]')); }catch(e){ return Promise.resolve([]); } }
+    if(this.electron && window.LuaChillDesktop.getInstalledApps){ try{ return Promise.resolve(window.LuaChillDesktop.getInstalledApps()); }catch(e){ return Promise.resolve([]); } }
+    return Promise.resolve([]);
+  },
   syncPolicy(p){
     if(this.android){ try{ window.LuaChillNative.setPolicy(JSON.stringify(p)); }catch(e){ console.warn(e); } }
+    else if(this.electron){ try{ window.LuaChillDesktop.setPolicy(p); }catch(e){ console.warn(e); } }
     else if(this.ext){ chrome.storage.local.set({policy:p}); try{ const r=chrome.runtime.sendMessage({type:'evaluate'}); if(r&&r.catch) r.catch(()=>{}); }catch(e){} }
-    else if(this.tauri){ window.__TAURI__.core.invoke('set_policy',{policy:p}).catch(e=>console.warn(e)); } },
-  getUsage(){ if(this.android){ try{ return Promise.resolve(JSON.parse(window.LuaChillNative.getUsage())); }catch(e){ return Promise.resolve(null); } }
-    if(!this.ext) return Promise.resolve(null); return chrome.storage.local.get('usage').then(r=>r.usage||null).catch(()=>null); }
+    else if(this.tauri){ window.__TAURI__.core.invoke('set_policy',{policy:p}).catch(e=>console.warn(e)); }
+  },
+  getUsage(){
+    if(this.android){ try{ return Promise.resolve(JSON.parse(window.LuaChillNative.getUsage())); }catch(e){ return Promise.resolve(null); } }
+    if(this.electron){ try{ return Promise.resolve(window.LuaChillDesktop.getUsage()); }catch(e){ return Promise.resolve(null); } }
+    if(this.ext) return chrome.storage.local.get('usage').then(r=>r.usage||null).catch(()=>null);
+    return Promise.resolve(null);
+  },
+  notify(title, body, tag='luachill'){
+    if(this.android && window.LuaChillNative.showNotification){
+      try{ window.LuaChillNative.showNotification(title, body); return; }catch(e){}
+    }
+    if(this.electron && window.LuaChillDesktop.notify){
+      try{ window.LuaChillDesktop.notify({title, body}); return; }catch(e){}
+    }
+    if(typeof Notification!=='undefined' && Notification.permission==='granted'){
+      try{ new Notification(title, {body, tag, icon:'assets/icons/icon128.png'}); }catch(e){}
+    }
+  }
 };
 
-/* ---------- Game Core ---------- */
+function defaultClock(){
+  const tz=ClockUtil.deviceTz();
+  return {mode:'auto',tz,region:'Tự động theo thiết bị',manualOffset:0,lat:null,lon:null,lastScan:null};
+}
+function defaultBlock(){
+  return {
+    mode:'apps', /* 'lockdown' | 'apps' | 'groups' */
+    web:['facebook','tiktok'], custom:[], android:[], pc:[],
+    appLimits:{},
+    emergency:[], /* Android: tối đa 3 {pkg,name} */
+    emergencyPc:[], /* Electron PC: tối đa 3 {pkg,name} */
+    emergencyWeb:['zalo.me'], /* Web/Ext: tối đa 3 tên miền */
+    groups:JSON.parse(JSON.stringify(DATA.DEFAULT_GROUPS))
+  };
+}
+function defaultReminders(){
+  return {enabled:true,quests:true,questTime:'10:00',questTime2:'17:00',checkin:true,bed:true,bedLead:15,wake:true,limitWarn:true,limitLead:10,fired:{}};
+}
+
 class GameCore {
-  constructor(){ this.ls={}; this.state=Store.load(); this.bedLockOn=false; this._n=0; this.visible=true; if(this.state) this.migrate(); }
+  constructor(){ this.ls={}; this.state=Store.load(); this.bedLockOn=false; this._n=0; this.visible=true; this._lastRealMs=Date.now(); if(this.state) this.migrate(); }
   migrate(){ const s=this.state; if(!s||s.v!==1){ this.state=null; return; }
-    s.sleep.bed=s.sleep.bed||'23:00'; s.sleep.wake=s.sleep.wake||'06:30'; s.sleep.hist=s.sleep.hist||[];
-    s.checkin=s.checkin||{last:null,streak:0,hist:[]}; s.garden.xp=s.garden.xp??30; s.pets.xp=s.pets.xp||{};
-    s.decor.lastCollect=s.decor.lastCollect||Date.now(); s.monster=s.monster||{best:0,plays:0}; s.screen.floor=s.screen.floor||0;
+    s.sleep.bed=s.sleep.bed||'23:00'; s.sleep.hist=s.sleep.hist||[];
     s.sleep.wake=U.hToHm(U.hmToH(s.sleep.bed)+DATA.SLEEP_HOURS);
-    s.block=s.block||{web:['facebook','tiktok'],custom:[],android:[]}; s.care=s.care||{streak:0,last:null,combo:{}}; }
+    s.checkin=s.checkin||{last:null,streak:0,hist:[]}; s.garden.xp=s.garden.xp??30; s.pets.xp=s.pets.xp||{};
+    s.created=s.created||{day:s.day,hour:8};
+    s.decor.lastCollect=s.decor.lastCollect||Date.now(); s.monster=s.monster||{best:0,plays:0};
+    s.screen.floor=s.screen.floor||0; s.screen.sites=s.screen.sites||{}; s.screen.allSites=s.screen.allSites||{};
+    s.screen.totalUsed=s.screen.totalUsed??s.screen.used??0; s.screen.webSec=s.screen.webSec||0;
+    s.clock={...defaultClock(),...(s.clock||{})};
+    const db=defaultBlock();
+    s.block={...db,...(s.block||{})};
+    if(!Array.isArray(s.block.groups)||!s.block.groups.length) s.block.groups=db.groups;
+    s.block.groups.forEach(g=>{ g.android=Array.isArray(g.android)?g.android:[]; g.pc=Array.isArray(g.pc)?g.pc:[]; });
+    s.block.pc=Array.isArray(s.block.pc)?s.block.pc:[];
+    s.block.appLimits=s.block.appLimits||{}; s.block.emergency=s.block.emergency||[]; s.block.emergencyPc=s.block.emergencyPc||[]; s.block.emergencyWeb=s.block.emergencyWeb||['zalo.me'];
+    s.reminders={...defaultReminders(),...(s.reminders||{})}; s.reminders.fired=s.reminders.fired||{};
+    s.care=s.care||{streak:0,last:null,combo:{}};
+    /* Di chuyển save phòng cũ sang hệ thống nhiều phòng + ngoại thất nhà + theme miễn phí */
+    s.decor=s.decor||{wall:'#F7F4D5',floor:'#c99a6b',placed:[],boxes:[],lastCollect:Date.now()};
+    if(!s.decor.rooms){
+      s.decor.rooms={bedroom:{wall:s.decor.wall||'#F7F4D5',floor:s.decor.floor||'#c99a6b',placed:Array.isArray(s.decor.placed)?s.decor.placed:[]}};
+    }
+    if(!s.decor.activeRoom||!s.decor.rooms[s.decor.activeRoom]) s.decor.activeRoom='bedroom';
+    s.decor.house=s.decor.house||'mushroom';
+    if(!Array.isArray(s.decor.housesOwned)||!s.decor.housesOwned.length) s.decor.housesOwned=['mushroom'];
+    if(!s.decor.housesOwned.includes(s.decor.house)) s.decor.housesOwned.push(s.decor.house);
+    this._syncRoomMirror();
+    let th=s.theme||(typeof localStorage!=='undefined'&&localStorage.getItem('lc_theme'))||'classic';
+    let sc=s.scheme||(typeof localStorage!=='undefined'&&localStorage.getItem('lc_scheme'))||'light';
+    if(th==='darkforest'){ th='forest'; sc='dark'; }
+    if(!DATA.THEMES.some(t=>t.id===th)) th='classic';
+    s.theme=th; s.scheme=(sc==='dark'?'dark':'light'); }
   reload(){ this.state=Store.load(); this.migrate(); this.emit('change'); }
   on(e,f){ (this.ls[e]=this.ls[e]||[]).push(f); return ()=>{ this.ls[e]=this.ls[e].filter(x=>x!==f); }; }
   emit(e,d){ (this.ls[e]||[]).slice().forEach(f=>{ try{ f(d); }catch(err){ console.error(err); } }); }
   save(){ if(this.state) Store.save(this.state); }
   get s(){ return this.state; }
 
-  newGame(name,acc){ const now=new Date(), day=U.dayKeyAt(now,7);
+  newGame(name,acc){
+    const clock=defaultClock(), now=ClockUtil.dateInTz(new Date(),clock.tz), day=U.dayKeyAt(now,7);
     this.state={ v:1, name:name||'Bạn Lừa', created:{day,hour:now.getHours()+now.getMinutes()/60},
       acc:{owned:acc?[acc]:[],on:acc?[acc]:[]}, gems:150, energy:82, happy:72, offset:0, day,
-      screen:{limit:120,used:86,extra:0,acc:0,locked:false,floor:0,sites:{}},
+      clock,
+      screen:{limit:120,used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{}},
       night:{key:null,slept:false,broken:false},
-      sleep:{last:null,lastDay:null,streak:2,buffDay:null,bed:'23:00',wake:'07:00',hist:[]},
+      sleep:{last:null,lastDay:null,streak:0,buffDay:null,bed:'23:00',wake:'07:00',hist:[]},
       checkin:{last:null,streak:0,hist:[]},
       quests:{day,done:{}}, questsTotal:0,
       garden:{health:72,xp:30,watered:{},missed:{}},
       pets:{owned:['dog'],fed:{},happy:70,xp:{dog:0}},
       force:{until:0,id:null},
-      decor:{wall:'#F7F4D5',floor:'#c99a6b',lastCollect:Date.now(),
+      decor:{wall:'#F7F4D5',floor:'#c99a6b',lastCollect:Date.now(),activeRoom:'bedroom',house:'mushroom',housesOwned:['mushroom'],
+        rooms:{bedroom:{wall:'#F7F4D5',floor:'#c99a6b',placed:[{uid:'b1',id:'bed',gx:0,gy:1,rot:0},{uid:'p1',id:'plant',gx:5,gy:0,rot:0},{uid:'r1',id:'rug',gx:2,gy:2,rot:0}]}},
         placed:[{uid:'b1',id:'bed',gx:0,gy:1,rot:0},{uid:'p1',id:'plant',gx:5,gy:0,rot:0},{uid:'r1',id:'rug',gx:2,gy:2,rot:0}],
         boxes:[{uid:'x1',id:'lamp'}]},
+      theme:((typeof localStorage!=='undefined'&&localStorage.getItem('lc_theme'))||'classic')==='darkforest'?'forest':((typeof localStorage!=='undefined'&&localStorage.getItem('lc_theme'))||'classic'),
+      scheme:((typeof localStorage!=='undefined'&&localStorage.getItem('lc_scheme'))||((typeof localStorage!=='undefined'&&localStorage.getItem('lc_theme')==='darkforest')?'dark':'light')),
       chats:{}, shop:{month:1,history:[]}, monster:{best:0,plays:0}, pendingMorning:null, seenHint:false,
-      block:{web:['facebook','tiktok'],custom:[],android:[]}, care:{streak:0,last:null,combo:{}} };
+      block:defaultBlock(), reminders:defaultReminders(), care:{streak:0,last:null,combo:{}} };
     this.save(); this.syncPolicy(); this.emit('change'); }
 
-  /* --- time & sleep schedule (giờ ngủ do người chơi chọn) --- */
-  now(){ return new Date(Date.now()+(this.s?this.s.offset:0)); }
+  /* ---------------- ĐỒNG HỒ: Auto Location / Timezone / Manual ---------------- */
+  effectiveOffsetMs(){
+    const s=this.s; if(!s) return 0;
+    const demo=s.offset||0, c=s.clock||defaultClock();
+    if(c.mode==='manual') return demo+(c.manualOffset||0);
+    return demo+ClockUtil.tzShiftMs(c.tz||ClockUtil.deviceTz(), new Date(Date.now()+demo));
+  }
+  now(){ return new Date(Date.now()+this.effectiveOffsetMs()); }
   hour(){ const n=this.now(); return n.getHours()+n.getMinutes()/60+n.getSeconds()/3600; }
+  clockLabel(){
+    const c=(this.s&&this.s.clock)||defaultClock();
+    if(c.mode==='manual') return 'Giờ thủ công';
+    return `${c.tz} (${ClockUtil.utcLabel(c.tz)})`;
+  }
+  setClockTimezone(tz, region){
+    const s=this.s; s.clock={...s.clock,mode:'tz',tz,region:region||tz,manualOffset:0,lastScan:Date.now()};
+    this.save(); this.syncPolicy(); this.tick(); this.emit('change');
+  }
+  setClockAuto(tz, region, coords){
+    const s=this.s; s.clock={...s.clock,mode:'auto',tz:tz||ClockUtil.deviceTz(),region:region||'Tự động theo thiết bị',manualOffset:0,lat:coords?coords.lat:null,lon:coords?coords.lon:null,lastScan:Date.now()};
+    this.save(); this.syncPolicy(); this.tick(); this.emit('change');
+  }
+  setClockManual(hm, ymdStr){
+    const s=this.s; const [h,m]=String(hm).split(':').map(Number); if(isNaN(h)||isNaN(m)) return false;
+    const base=new Date(Date.now()+(s.offset||0));
+    let target;
+    if(ymdStr && /^\d{4}-\d{2}-\d{2}$/.test(ymdStr)){ const [Y,M,D]=ymdStr.split('-').map(Number); target=new Date(Y,M-1,D,h,m,base.getSeconds()); }
+    else target=new Date(base.getFullYear(),base.getMonth(),base.getDate(),h,m,base.getSeconds());
+    s.clock={...s.clock,mode:'manual',manualOffset:target.getTime()-base.getTime(),region:`Tự chỉnh (${U.pad(h)}:${U.pad(m)})`,lastScan:Date.now()};
+    this.save(); this.syncPolicy(); this.tick(); this.emit('change'); return true;
+  }
+  async scanLocationTime(){
+    /* 1. Ưu tiên GPS/Vị trí trình duyệt (nếu người dùng cho phép) */
+    const gps=await new Promise(res=>{
+      if(typeof navigator==='undefined'||!navigator.geolocation){ res(null); return; }
+      navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude}),()=>res(null),{timeout:5000,maximumAge:300000});
+    });
+    if(gps){
+      try{
+        const j=await ClockUtil.fetchJson(`https://timeapi.io/api/TimeZone/coordinate?latitude=${gps.lat.toFixed(4)}&longitude=${gps.lon.toFixed(4)}`,3500);
+        if(j&&j.timeZone){ this.setClockAuto(j.timeZone,`Vị trí GPS (${j.timeZone})`,gps); return {ok:true,source:'gps',tz:j.timeZone,region:`Vị trí GPS (${j.timeZone})`}; }
+      }catch(e){}
+      const g=ClockUtil.guessTzByCoords(gps.lat,gps.lon);
+      this.setClockAuto(g.tz,g.region,gps);
+      return {ok:true,source:'gps-offline',tz:g.tz,region:g.region};
+    }
+    /* 2. Dự phòng: quét vùng qua IP (chỉ đọc múi giờ/thành phố) */
+    try{
+      const ip=await ClockUtil.fetchJson('https://ipapi.co/json/',3000);
+      if(ip&&ip.timezone){
+        const reg=[ip.city,ip.country_name].filter(Boolean).join(', ')||ip.timezone;
+        this.setClockAuto(ip.timezone,`${reg} (Vùng mạng)`);
+        return {ok:true,source:'ip',tz:ip.timezone,region:reg};
+      }
+    }catch(e){}
+    /* 3. Dự phòng cuối: múi giờ hệ điều hành */
+    const tz=ClockUtil.deviceTz();
+    this.setClockAuto(tz,'Múi giờ hệ thống (không quét được GPS/vùng)');
+    return {ok:false,source:'device',tz,region:'Không quét được vị trí — đang dùng giờ máy. Bạn có thể chọn múi giờ hoặc tự chỉnh giờ.'};
+  }
+
+  /* ---------------- GIỜ NGỦ 8 TIẾNG & ĐIỂM DANH 8 TIẾNG ---------------- */
   bedH(){ return U.hmToH(this.s.sleep.bed); }
   wakeH(){ return U.hmToH(this.s.sleep.wake); }
-  dk(d){ return U.dayKeyAt(d,this.s?this.wakeH():6.5); }
+  dk(d){ return U.dayKeyAt(d,this.s?this.wakeH():7); }
   isBedtime(h=this.hour()){ const b=this.bedH(), w=this.wakeH(); return b>w?(h>=b||h<w):(h>=b&&h<w); }
   isNight(){ const h=this.hour(); return h>=19||h<this.wakeH(); }
   sleepHours(bed=this.s.sleep.bed,wake=this.s.sleep.wake){ return ((U.hmToH(wake)-U.hmToH(bed))+24)%24; }
   minsToBed(){ return Math.round((((this.bedH()-this.hour())+24)%24)*60); }
-  /* Người chơi chọn GIỜ NGỦ; giờ dậy tự = giờ ngủ + 8 tiếng (ngủ đủ, hợp lý) */
   setSleepCfg(bed){ const s=this.s;
     if(this.isBedtime() && !s.night.broken) return {ok:false,msg:'Đang trong giờ ngủ — không thể đổi lịch lúc này (chống "lách luật") 😉'};
     s.sleep.bed=bed; s.sleep.wake=U.hToHm(U.hmToH(bed)+DATA.SLEEP_HOURS); this.bedLockOn=false; this.save(); this.syncPolicy(); this.emit('change'); this.tick();
     return {ok:true,hours:DATA.SLEEP_HOURS,wake:s.sleep.wake}; }
-  /* --- danh sách app/web bị chặn --- */
-  blockedDomains(){ const b=this.s.block; return [...DATA.WEB_APPS.filter(a=>b.web.includes(a.id)).flatMap(a=>a.domains),...b.custom]; }
-  setBlock(kind,list){ this.s.block[kind]=[...new Set(list)]; this.save(); this.syncPolicy(); this.emit('change'); }
+
+  /* ---------------- 3 CHẾ ĐỘ KHÓA ĐỘC LẬP (MỖI CHẾ ĐỘ 1 CƠ CHẾ RIÊNG) ---------------- */
+  domainsOfWebIds(ids, custom=[]){
+    return [...new Set([...DATA.WEB_APPS.filter(a=>(ids||[]).includes(a.id)).flatMap(a=>a.domains),...(custom||[])])];
+  }
+  blockedDomains(){ const b=this.s.block;
+    if(b.mode==='groups') return [...new Set(b.groups.flatMap(g=>this.domainsOfWebIds(g.web,g.custom)))];
+    return this.domainsOfWebIds(b.web,b.custom);
+  }
+  setBlockMode(mode){ if(!['lockdown','apps','groups'].includes(mode)) return;
+    this.s.block.mode=mode;
+    /* Chuyển sang chế độ từng app hoặc nhóm app sẽ gỡ cờ khóa tổng hằng ngày của chế độ Khóa toàn bộ */
+    if(mode!=='lockdown' && this.s.screen.locked){ this.s.screen.locked=false; this.emit('screenLock',false); }
+    this.save(); this.syncPolicy(); this.emit('change'); }
+  blockModeLabel(mode=(this.s&&this.s.block&&this.s.block.mode)||'apps'){
+    return mode==='lockdown'?'Khóa toàn bộ hằng ngày (chừa 3 khẩn cấp)'
+      :mode==='groups'?'Khóa theo nhóm app'
+      :'Khóa riêng từng app';
+  }
+  setBlock(kind,list){
+    const next=[...new Set(list)];
+    this.s.block[kind]=next;
+    /* Tự cấp hạn mức riêng mặc định (30p) cho app/web mới được chọn ở chế độ Khóa riêng từng app */
+    if(kind==='android'||kind==='pc'){
+      next.forEach(a=>{ const k=a.pkg||a; if(k && !this.s.block.appLimits[k]) this.s.block.appLimits[k]=DATA.DEFAULT_APP_LIMIT; });
+    } else if(kind==='web'){
+      next.forEach(id=>{ const wa=DATA.WEB_APPS.find(x=>x.id===id); if(wa && !this.s.block.appLimits[wa.domains[0]]) this.s.block.appLimits[wa.domains[0]]=DATA.DEFAULT_APP_LIMIT; });
+    } else if(kind==='custom'){
+      next.forEach(d=>{ if(d && !this.s.block.appLimits[d]) this.s.block.appLimits[d]=DATA.DEFAULT_APP_LIMIT; });
+    }
+    this.save(); this.syncPolicy(); this.emit('change');
+  }
+  appLimitOf(key){
+    const raw=Number((this.s&&this.s.block&&this.s.block.appLimits&&this.s.block.appLimits[key])||0);
+    return raw>0?raw:DATA.DEFAULT_APP_LIMIT;
+  }
+  appUsedOf(key, label=''){
+    const all=(this.s&&this.s.screen&&(this.s.screen.allSites||this.s.screen.sites))||{};
+    const kl=String(key||'').toLowerCase(), ll=String(label||'').toLowerCase();
+    let sum=0;
+    for(const [k,v] of Object.entries(all)){
+      const s=k.toLowerCase();
+      if(s===kl || (ll&&s===ll) || s.endsWith('.'+kl)) sum+=v;
+    }
+    return sum;
+  }
+  activeAppEntries(){
+    const b=this.s.block, extra=this.s.screen.extra||0;
+    if(Bridge.nativeApps){
+      const arr=Bridge.electron?(b.pc||[]):(b.android||[]);
+      return arr.map(a=>{ const pkg=a.pkg||a, name=a.name||pkg, lim=this.appLimitOf(pkg)+extra, used=this.appUsedOf(pkg,name); return {key:pkg,name,limit:lim,baseLimit:this.appLimitOf(pkg),used,locked:used>=lim}; });
+    }
+    const out=[];
+    for(const a of DATA.WEB_APPS){
+      if(!b.web.includes(a.id)) continue;
+      const key=a.domains[0], base=this.appLimitOf(key), lim=base+extra;
+      const used=a.domains.reduce((sum,d)=>sum+this.appUsedOf(d),0);
+      out.push({key,name:a.name,limit:lim,baseLimit:base,used,locked:used>=lim});
+    }
+    for(const d of (b.custom||[])){
+      const base=this.appLimitOf(d), lim=base+extra, used=this.appUsedOf(d);
+      out.push({key:d,name:d,limit:lim,baseLimit:base,used,locked:used>=lim});
+    }
+    return out;
+  }
+  setAppLimit(key, mins){
+    const m=Math.max(5,Math.min(480,Math.round(Number(mins)||DATA.DEFAULT_APP_LIMIT)));
+    this.s.block.appLimits[key]=m;
+    this.save(); this.syncPolicy(); this.emit('change');
+  }
+  setEmergency(kind, list){
+    const arr=Array.isArray(list)?list:[];
+    if(arr.length>DATA.MAX_EMERGENCY) return {ok:false,msg:`Chỉ được chọn tối đa ${DATA.MAX_EMERGENCY} app khẩn cấp!`};
+    this.s.block[kind]=arr; this.save(); this.syncPolicy(); this.emit('change'); return {ok:true};
+  }
+  upsertGroup(g){
+    const list=this.s.block.groups; const idx=list.findIndex(x=>x.id===g.id);
+    const clean={id:g.id||('g_'+U.uid()),name:String(g.name||'Nhóm mới').trim().slice(0,24),limit:Math.max(5,Math.min(480,Math.round(Number(g.limit)||30))),
+      web:[...new Set(g.web||[])],custom:[...new Set(g.custom||[])],android:Array.isArray(g.android)?g.android:[],pc:Array.isArray(g.pc)?g.pc:[]};
+    if(idx>=0) list[idx]=clean; else list.push(clean);
+    this.save(); this.syncPolicy(); this.emit('change'); return clean;
+  }
+  deleteGroup(id){
+    this.s.block.groups=this.s.block.groups.filter(g=>g.id!==id);
+    this.save(); this.syncPolicy(); this.emit('change');
+  }
+  /* Tính phút đã dùng của 1 nhóm từ dữ liệu đo thật */
+  groupUsed(g){
+    const all=this.s.screen.allSites||this.s.screen.sites||{};
+    if(Bridge.android||Bridge.electron){
+      const arr=Bridge.electron?(g.pc||[]):(g.android||[]);
+      const names=new Set(arr.map(a=>String(a.name||a.pkg||a).toLowerCase()));
+      const pkgs=new Set(arr.map(a=>String(a.pkg||a).toLowerCase()));
+      let sum=0; for(const [k,v] of Object.entries(all)){ const kl=k.toLowerCase(); if(names.has(kl)||pkgs.has(kl)) sum+=v; }
+      return sum;
+    }
+    const doms=this.domainsOfWebIds(g.web,g.custom);
+    let sum=0; for(const [d,v] of Object.entries(all)) if(doms.some(x=>d===x||d.endsWith('.'+x))) sum+=v;
+    return sum;
+  }
+
+  /* ---------------- NHẮC HẸN THÔNG MINH ---------------- */
+  setReminder(patch){
+    Object.assign(this.s.reminders, patch);
+    this.save(); this.syncPolicy(); this.emit('change');
+  }
+  checkReminders(){
+    const s=this.s, r=s.reminders; if(!r||!r.enabled) return;
+    const h=this.hour(), hmNow=U.hm(this.now()), day=s.day;
+    const fire=(key,title,body,tab)=>{
+      const k=day+'|'+key; if(r.fired[k]) return;
+      r.fired[k]=Date.now();
+      /* Dọn key ngày cũ */
+      for(const old of Object.keys(r.fired)) if(!old.startsWith(day+'|')) delete r.fired[old];
+      this.save();
+      this.emit('remind',{key,title,body,tab});
+    };
+    if(r.bed){
+      const toBed=this.minsToBed();
+      if(toBed>0 && toBed<=r.bedLead) fire('bedLead','Sắp đến giờ ngủ 🌙',`Còn ${toBed} phút tới ${s.sleep.bed}. Hãy cất máy chuẩn bị ngủ đủ 8 tiếng nhé!`,'sleep');
+      if(this.isBedtime() && !s.night.slept && !s.night.broken) fire('bedNow','Đến giờ ngủ rồi 🌙',`Đã ${s.sleep.bed}! Toàn bộ app giải trí sẽ khóa đến ${s.sleep.wake}.`,'sleep');
+    }
+    if(r.wake && !this.isBedtime() && this.hoursSinceWake()<=0.25){
+      fire('wake','Chào buổi sáng! ☀️',`Đã ${s.sleep.wake} rồi — dậy uống 1 ly nước và bắt đầu ngày mới nhé!`,'sleep');
+    }
+    if(r.checkin && this.canCheckIn() && this.hoursSinceWake()>=0.15){
+      fire('checkin','Nhớ điểm danh buổi sáng 📅',`Cửa sổ điểm danh 8 tiếng đang mở — vào nhận Gem ngay!`,'sleep');
+    }
+    if(r.quests && this.questCount()<DATA.QUESTS.length){
+      if(hmNow===r.questTime) fire('quest1','Nhắc nhiệm vụ đời thực ✅',`Còn ${DATA.QUESTS.length-this.questCount()} Quest hôm nay (uống nước, chạm cỏ, đọc sách...).`,'tasks');
+      if(r.questTime2 && hmNow===r.questTime2) fire('quest2','Nhắc nhiệm vụ buổi chiều 🌿',`Hoàn thành nốt ${DATA.QUESTS.length-this.questCount()} Quest để nhận thêm Gem nhé!`,'tasks');
+    }
+    if(r.limitWarn){
+      const mode=s.block.mode||'apps', extra=s.screen.extra||0;
+      if(mode==='lockdown'){
+        const rem=this.screenRemaining();
+        if(rem>0 && rem<=r.limitLead) fire('limitWarn','Sắp chạm giới hạn hằng ngày ⏳',`Chỉ còn ${rem} phút trước khi bật Khóa toàn bộ!`,'timer');
+      } else if(mode==='apps'){
+        for(const a of this.activeAppEntries()){
+          const left=a.limit-a.used;
+          if(left>0 && left<=r.limitLead) fire('app_'+a.key,`${a.name} sắp hết giờ ⏳`,`Chỉ còn ${left} phút cho ${a.name} hôm nay.`,'timer');
+        }
+      } else if(mode==='groups'){
+        for(const g of s.block.groups){
+          const left=(g.limit+extra)-this.groupUsed(g);
+          if(left>0 && left<=r.limitLead) fire('grp_'+g.id,`Nhóm "${g.name}" sắp hết giờ ⏳`,`Chỉ còn ${left} phút cho nhóm ${g.name} hôm nay.`,'timer');
+        }
+      }
+    }
+  }
+
   hasBuff(){ return this.s.sleep.buffDay===this.s.day; }
   isTiredToday(){ return this.s.sleep.last==='bad' && this.s.sleep.lastDay===this.s.day; }
   mood(){ const s=this.s; if(!s) return 'normal';
@@ -164,10 +553,47 @@ class GameCore {
     if(s.energy>=65 && s.happy>=60) return 'happy';
     return 'normal'; }
 
-  /* --- policy gửi xuống background/native blocker --- */
-  policy(){ const s=this.s; return {limit:s.screen.limit,extra:s.screen.extra,usedFloor:s.screen.floor||0,screenLocked:s.screen.locked,
-    bed:s.sleep.bed,wake:s.sleep.wake,brokenNight:s.night.broken?s.night.key:null,slept:!!s.night.slept,day:s.day,offset:s.offset||0,
-    blocked:this.blockedDomains(),blockedPkgs:s.block.android.map(a=>a.pkg||a),updated:Date.now()}; }
+  /* ---------------- POLICY GỬI XUỐNG ANDROID / EXTENSION / ELECTRON (CHỈ 1 CHẾ ĐỘ DUY NHẤT) ---------------- */
+  policy(){
+    const s=this.s, b=s.block, r=s.reminders, isPc=Bridge.electron;
+    const mode=['lockdown','apps','groups'].includes(b.mode)?b.mode:'apps';
+    const pickedApps=isPc?(b.pc||[]):(b.android||[]);
+    const pickedEm=isPc?(b.emergencyPc||[]):(b.emergency||[]);
+    /* Với chế độ 'apps': mọi app/domain đã chọn luôn có hạn mức phút riêng cụ thể (không dùng giới hạn tổng hằng ngày) */
+    const appLims={};
+    if(mode==='apps'){
+      if(Bridge.nativeApps){
+        pickedApps.forEach(a=>{ const k=a.pkg||a; if(k) appLims[k]=this.appLimitOf(k); });
+      } else {
+        DATA.WEB_APPS.filter(a=>(b.web||[]).includes(a.id)).forEach(a=>{
+          const m=this.appLimitOf(a.domains[0]);
+          a.domains.forEach(d=>{ appLims[d]=m; });
+        });
+        (b.custom||[]).forEach(d=>{ appLims[d]=this.appLimitOf(d); });
+      }
+    }
+    return {
+      limit:s.screen.limit, extra:s.screen.extra, usedFloor:mode==='lockdown'?(s.screen.floor||0):0, screenLocked:mode==='lockdown'&&!!s.screen.locked,
+      bed:s.sleep.bed, wake:s.sleep.wake, brokenNight:s.night.broken?s.night.key:null, slept:!!s.night.slept,
+      day:s.day, offset:this.effectiveOffsetMs(), tz:(s.clock&&s.clock.tz)||ClockUtil.deviceTz(),
+      blockMode:mode,
+      blocked:mode==='apps'?this.domainsOfWebIds(b.web,b.custom):[],
+      blockedPkgs:mode==='apps'?pickedApps.map(a=>a.pkg||a):[],
+      appLimits:appLims,
+      emergencyPkgs:mode==='lockdown'?pickedEm.slice(0,DATA.MAX_EMERGENCY).map(a=>a.pkg||a):[],
+      emergencyWeb:mode==='lockdown'?(b.emergencyWeb||[]).slice(0,DATA.MAX_EMERGENCY):[],
+      groups:mode==='groups'?(b.groups||[]).map(g=>({
+        id:g.id, name:g.name, limit:g.limit,
+        domains:this.domainsOfWebIds(g.web,g.custom),
+        pkgs:(isPc?(g.pc||[]):(g.android||[])).map(a=>a.pkg||a)
+      })):[],
+      reminders:{
+        enabled:!!r.enabled, quests:!!r.quests, questTime:r.questTime, questTime2:r.questTime2,
+        checkin:!!r.checkin, bed:!!r.bed, bedLead:r.bedLead, wake:!!r.wake, limitWarn:!!r.limitWarn, limitLead:r.limitLead
+      },
+      updated:Date.now()
+    };
+  }
   syncPolicy(){ if(this.s) Bridge.syncPolicy(this.policy()); }
 
   tick(){ const s=this.s; if(!s) return;
@@ -176,21 +602,42 @@ class GameCore {
     if(bed){ if(s.night.key!==s.day) s.night={key:s.day,slept:false,broken:false};
       if(!s.night.broken && !this.bedLockOn){ this.bedLockOn=true; this.syncPolicy(); this.emit('bedLock',true); } }
     else if(this.bedLockOn){ this.bedLockOn=false; this.emit('bedLock',false); }
-    if(Bridge.android||Bridge.ext){ if(this._n%3===0) Bridge.getUsage().then(u=>{ if(!u||u.day!==s.day) return; const v=Math.max(u.minutes,s.screen.floor||0);
-        if(v!==s.screen.used){ s.screen.used=v; s.screen.sites=u.sites||u.apps||{}; this.emit('change'); } }); }
-    else if(!(bed&&s.night.slept) && this.visible){ s.screen.acc++; if(s.screen.acc>=20){ s.screen.acc=0; s.screen.used++; } }
-    if(this.screenRemaining()<=0 && !s.screen.locked){ s.screen.locked=true; this.syncPolicy(); this.emit('screenLock',true); }
+
+    /* Đo thời gian sử dụng THẬT theo từng nền tảng */
+    if(Bridge.realUsage){
+      if(this._n%3===0) Bridge.getUsage().then(u=>{
+        if(!u||u.day!==s.day) return;
+        const tot=u.totalMinutes??u.minutes??0;
+        const rel=s.block.mode==='lockdown'?tot:(u.minutes??tot);
+        const v=Math.max(rel, s.screen.floor||0);
+        const changed=v!==s.screen.used || tot!==s.screen.totalUsed || JSON.stringify(u.allSites||u.allApps||{})!==JSON.stringify(s.screen.allSites||{});
+        s.screen.used=v; s.screen.totalUsed=tot;
+        s.screen.sites=u.sites||u.apps||{};
+        s.screen.allSites=u.allSites||u.allApps||s.screen.sites;
+        if(changed) this.emit('change');
+      });
+    } else if(!(bed&&s.night.slept) && this.visible){
+      /* Trên Web/PWA: đo đúng thời gian thực (giây thật 60s = 1 phút) thay vì giả lập nhanh */
+      const nowMs=Date.now(), dtSec=Math.min(5,Math.max(0,(nowMs-this._lastRealMs)/1000));
+      this._lastRealMs=nowMs;
+      s.screen.webSec=(s.screen.webSec||0)+dtSec;
+      const realMins=Math.floor(s.screen.webSec/60);
+      const v=Math.max(realMins, s.screen.floor||0);
+      if(v!==s.screen.used){ s.screen.used=v; s.screen.totalUsed=v; s.screen.allSites={'Lừa Chill (Web)':v}; this.emit('change'); }
+    } else { this._lastRealMs=Date.now(); }
+
+    if(s.block.mode==='lockdown' && this.screenRemaining()<=0 && !s.screen.locked){ s.screen.locked=true; this.syncPolicy(); this.emit('screenLock',true); }
     s.energy=U.clamp(s.energy-1/80); s.happy=U.clamp(s.happy-1/110); s.pets.happy=U.clamp(s.pets.happy-1/90);
     this.checkMissed();
+    if(this._n%5===0) this.checkReminders();
     if(++this._n%5===0) this.save();
     this.emit('tick'); }
 
-  /* --- sáng hôm sau: đánh giá giấc ngủ (điểm danh nhận Gem riêng) --- */
   newDay(force){ const s=this.s; const prev=s.day;
     const q=force || ((s.night.key===prev && s.night.broken)?'bad':'good');
     s.day=this.dk(this.now());
     s.quests={day:s.day,done:{}};
-    Object.assign(s.screen,{used:0,extra:0,acc:0,locked:false,floor:0,sites:{}});
+    Object.assign(s.screen,{used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{}});
     s.night={key:null,slept:false,broken:false}; this.bedLockOn=false;
     if(q==='good'){ s.sleep.streak++; s.energy=100; s.happy=U.clamp(s.happy+12); s.sleep.buffDay=s.day; s.garden.health=U.clamp(s.garden.health+25); }
     else { s.sleep.streak=0; s.energy=40; s.happy=U.clamp(s.happy-10); s.sleep.buffDay=null; s.garden.health=U.clamp(s.garden.health-5); }
@@ -199,7 +646,6 @@ class GameCore {
     this.save(); this.syncPolicy();
     this.emit('bedLock',false); this.emit('screenLock',false); this.emit('morning',s.pendingMorning); this.emit('change'); }
 
-  /* --- Điểm danh buổi sáng: mở trong 8 tiếng sau giờ dậy --- */
   hoursSinceWake(){ return ((this.hour()-this.wakeH())+24)%24; }
   checkInOpen(){ return !this.isBedtime() && this.hoursSinceWake()<DATA.CHECKIN_WINDOW; }
   canCheckIn(){ return !!this.s && this.s.checkin.last!==this.s.day && this.checkInOpen(); }
@@ -212,20 +658,16 @@ class GameCore {
     const p=this.checkInPreview(), c=s.checkin; c.streak=p.streak; c.last=s.day; c.hist=[...c.hist.filter(d=>d!==s.day),s.day].slice(-30);
     this.boost(4,5); this.addGems(p.gem,'Điểm danh'); this.save(); this.emit('checkin',p); this.emit('change'); return {ok:true,...p}; }
 
-  /* --- gems & stats --- */
   addGems(n,why){ this.s.gems+=n; this.emit('gems',{n,why}); this.save(); }
   spend(n){ if(this.s.gems<n) return false; this.s.gems-=n; this.emit('gems',{n:-n}); this.save(); return true; }
   boost(e,h){ this.s.energy=U.clamp(this.s.energy+e); this.s.happy=U.clamp(this.s.happy+h); }
 
-  /* --- screen time --- */
   screenRemaining(){ const sc=this.s.screen; return sc.limit+sc.extra-sc.used; }
   setLimit(m){ const sc=this.s.screen; sc.limit=m; if(sc.locked && this.screenRemaining()>0){ sc.locked=false; this.emit('screenLock',false); } this.save(); this.syncPolicy(); this.emit('change'); }
 
-  /* --- bedtime --- */
   goSleep(){ this.s.night.slept=true; this.save(); this.syncPolicy(); this.emit('sleepState'); this.emit('change'); }
   breakBedLock(){ this.s.night.broken=true; this.s.night.slept=false; this.bedLockOn=false; this.save(); this.syncPolicy(); this.emit('bedLock',false); this.emit('change'); }
 
-  /* --- quests --- */
   questGem(id){ const q=DATA.QUESTS.find(x=>x.id===id); return Math.round(q.gem*(this.hasBuff()?1.2:1)); }
   questCount(){ return Object.keys(this.s.quests.done).length; }
   completeQuest(id,photo,auto){ const s=this.s, d=s.quests.done;
@@ -237,7 +679,6 @@ class GameCore {
     this.save(); this.syncPolicy(); this.emit('quest',{id,g,bonus}); this.emit('change');
     return {ok:true,g,bonus}; }
 
-  /* --- time windows --- */
   activeWin(list){ const s=this.s; if(Date.now()<s.force.until) return {id:s.force.id,label:'Demo',from:0,to:24,demo:true};
     const h=this.hour(); return list.find(w=>h>=w.from&&h<w.to)||null; }
   winState(list,doneMap){ const h=this.hour(), s=this.s;
@@ -250,18 +691,17 @@ class GameCore {
         if(s.day===s.created.day && w.to<=s.created.hour){ s.garden.missed[k]=2; continue; }
         s.garden.missed[k]=1; s.garden.health=U.clamp(s.garden.health-15); this.emit('wilt'); this.emit('change'); } } }
 
-  /* --- ƯU ĐÃI CHĂM SÓC: Giờ vàng (30' đầu khung giờ) • Chuỗi chăm sóc +10%/ngày (tối đa +50%) • Combo cả ngày +40 --- */
   careMult(){ return 1+Math.min(DATA.CARE.streakMax,this.s.care.streak)*DATA.CARE.streakPct/100; }
   isGolden(w){ return w.demo || (this.hour()-w.from)*60<=DATA.CARE.golden; }
   careStatus(){ const s=this.s, d=s.day; const wDone=DATA.GARDEN_WIN.filter(w=>s.garden.watered[d+'|'+w.id]).length, fDone=DATA.MEAL_WIN.filter(w=>s.pets.fed[d+'|'+w.id]).length;
     return {wDone,wTot:DATA.GARDEN_WIN.length,fDone,fTot:DATA.MEAL_WIN.length,streak:s.care.streak,mult:this.careMult(),comboDone:s.care.last===d}; }
-  careReward(base,w){ const parts=[[ 'Cơ bản',base ]]; let g=base; const m=this.careMult();
+  careReward(base,w){ const parts=[['Cơ bản',base]]; let g=base; const m=this.careMult();
     if(m>1){ const x=Math.round(base*(m-1)); parts.push([`Chuỗi chăm sóc ×${m.toFixed(1)}`,x]); g+=x; }
     if(this.isGolden(w)){ parts.push(['Giờ vàng',DATA.CARE.goldenGem]); g+=DATA.CARE.goldenGem; }
     return {g,parts}; }
   checkCombo(){ const s=this.s, c=this.careStatus(); if(c.comboDone||c.wDone<c.wTot||c.fDone<c.fTot) return 0;
     s.care.streak=(s.care.last===U.addDays(s.day,-1)?s.care.streak:0)+1; s.care.last=s.day; this.addGems(DATA.CARE.combo,'Combo chăm sóc'); this.boost(5,8); return DATA.CARE.combo; }
-  /* --- vườn: tưới đúng giờ → cây LỚN dần qua 5 giai đoạn --- */
+
   lvOf(xp,table){ let i=0; table.forEach((t,j)=>{ if(xp>=t.xp) i=j; }); return i; }
   gardenStage(){ return this.lvOf(this.s.garden.xp,DATA.GARDEN_STAGES); }
   water(){ const s=this.s, w=this.activeWin(DATA.GARDEN_WIN);
@@ -271,7 +711,6 @@ class GameCore {
     this.addGems(r.g,'Tưới cây'); this.completeQuest('plant',null,true); const combo=this.checkCombo(); const stage=this.gardenStage(); this.emit('change');
     return {ok:true,gem:r.g,parts:r.parts,combo,stageUp:stage>before,stage}; }
 
-  /* --- pet: cho ăn đúng bữa → pet LỚN (4 cấp) --- */
   petLv(id){ return this.lvOf(this.s.pets.xp[id]||0,DATA.PET_LV); }
   feed(){ const s=this.s, w=this.activeWin(DATA.MEAL_WIN);
     if(!w) return {ok:false,msg:'Chưa tới giờ ăn. Pet ăn đúng bữa mới khỏe nha!'};
@@ -285,54 +724,94 @@ class GameCore {
   adopt(id){ const p=DATA.PETS[id]; if(this.s.pets.owned.includes(id)) return {ok:false,msg:'Đã nhận nuôi rồi'};
     if(!this.spend(p.price)) return {ok:false,msg:'Chưa đủ Gem'}; this.s.pets.owned.push(id); this.s.pets.xp[id]=0; this.boost(0,10); this.save(); this.emit('pets'); this.emit('change'); return {ok:true}; }
 
-  /* --- accessories --- */
   buyAcc(id){ const a=DATA.ACCS[id]; if(this.s.acc.owned.includes(id)) return true; if(!this.spend(a.price)) return false;
     this.s.acc.owned.push(id); this.s.acc.on.push(id); this.save(); this.emit('acc'); return true; }
   toggleAcc(id){ const on=this.s.acc.on; const i=on.indexOf(id); if(i>=0) on.splice(i,1); else on.push(id); this.save(); this.emit('acc'); }
 
-  /* --- decor + tycoon income --- */
+  /* --- Mở rộng nhà (nhiều phòng), Ngoại thất nhà & Theme giao diện miễn phí --- */
+  _syncRoomMirror(){ const D=this.s&&this.s.decor; if(!D||!D.rooms) return; const r=D.rooms[D.activeRoom]||D.rooms.bedroom; D.wall=r.wall; D.floor=r.floor; D.placed=r.placed; }
+  curRoom(){ const D=this.s.decor; return D.rooms[D.activeRoom]||D.rooms.bedroom; }
+  switchRoom(id){ const D=this.s.decor; if(!D.rooms[id]) return false; D.activeRoom=id; this._syncRoomMirror(); this.save(); this.emit('decor'); return true; }
+  unlockRoom(id){ const cfg=DATA.ROOMS[id], D=this.s.decor; if(!cfg) return {ok:false,msg:'Phòng không tồn tại'};
+    if(D.rooms[id]){ this.switchRoom(id); return {ok:true}; }
+    if(!this.spend(cfg.price)) return {ok:false,msg:`Cần ${cfg.price} Gem để mở rộng ${cfg.name}`};
+    D.rooms[id]={wall:cfg.wall,floor:cfg.floor,placed:[]}; D.activeRoom=id; this._syncRoomMirror(); this.save(); this.emit('decor'); this.emit('change');
+    return {ok:true,room:cfg}; }
+  buyHouse(id){ const h=DATA.HOUSES[id], D=this.s.decor; if(!h) return {ok:false,msg:'Mẫu nhà không tồn tại'};
+    if(D.housesOwned.includes(id)){ D.house=id; this.save(); this.emit('house',id); this.emit('decor'); this.emit('change'); return {ok:true,equipped:true}; }
+    if(!this.spend(h.price)) return {ok:false,msg:`Cần ${h.price} Gem để mua ${h.name}`};
+    D.housesOwned.push(id); D.house=id; this.boost(4,10); this.save(); this.emit('house',id); this.emit('decor'); this.emit('change');
+    return {ok:true,bought:true}; }
+  setTheme(id){ if(id==='darkforest') id='forest';
+    if(!DATA.THEMES.some(t=>t.id===id)) return;
+    if(this.s){ this.s.theme=id; this.save(); }
+    try{ localStorage.setItem('lc_theme',id); }catch(e){}
+    this.emit('theme',{theme:id,scheme:this.s?this.s.scheme:'light'}); this.emit('change'); }
+  setScheme(sc){ const v=sc==='dark'?'dark':'light';
+    if(this.s){ this.s.scheme=v; this.save(); }
+    try{ localStorage.setItem('lc_scheme',v); }catch(e){}
+    this.emit('theme',{theme:this.s?this.s.theme:'classic',scheme:v}); this.emit('change'); }
+
   buyDecor(id){ if(!this.spend(DATA.DECOR[id].price)) return false; this.s.decor.boxes.push({uid:U.uid(),id}); this.save(); this.emit('decor'); return true; }
   fp(id,rot){ const d=DATA.DECOR[id]; return rot?{w:d.d,d:d.w}:{w:d.w,d:d.d}; }
-  canPlace(id,gx,gy,rot,ignore){ const f=this.fp(id,rot), flat=!!DATA.DECOR[id].flat;
+  canPlace(id,gx,gy,rot,ignore){ const f=this.fp(id,rot), flat=!!DATA.DECOR[id].flat, R=this.curRoom();
     if(gx<0||gy<0||gx+f.w>6||gy+f.d>6) return false;
-    return !this.s.decor.placed.some(p=>{ if(p.uid===ignore) return false; if(!!DATA.DECOR[p.id].flat!==flat) return false;
+    return !R.placed.some(p=>{ if(p.uid===ignore) return false; if(!!DATA.DECOR[p.id].flat!==flat) return false;
       const g=this.fp(p.id,p.rot); return gx<p.gx+g.w && gx+f.w>p.gx && gy<p.gy+g.d && gy+f.d>p.gy; }); }
-  place(uid,id,gx,gy,rot){ const D=this.s.decor; if(!this.canPlace(id,gx,gy,rot,uid)) return false;
-    D.boxes=D.boxes.filter(b=>b.uid!==uid); const ex=D.placed.find(p=>p.uid===uid);
-    if(ex) Object.assign(ex,{gx,gy,rot}); else D.placed.push({uid,id,gx,gy,rot}); this.save(); this.emit('decor'); return true; }
-  storeItem(uid){ const D=this.s.decor; const p=D.placed.find(x=>x.uid===uid); if(!p) return; D.placed=D.placed.filter(x=>x!==p); D.boxes.push({uid,id:p.id}); this.save(); this.emit('decor'); }
-  paint(kind,color){ const D=this.s.decor; if(D[kind]===color) return true; if(!this.spend(DATA.PAINT_COST)) return false; D[kind]=color; this.save(); this.emit('decor'); return true; }
-  comfort(){ return this.s.decor.placed.reduce((a,p)=>a+(DATA.DECOR[p.id].comfort||5),0)+(this.s.decor.wall!=='#F7F4D5'?3:0); }
-  incomeRate(){ return Math.round(this.comfort()/5); }
+  place(uid,id,gx,gy,rot){ const D=this.s.decor, R=this.curRoom(); if(!this.canPlace(id,gx,gy,rot,uid)) return false;
+    D.boxes=D.boxes.filter(b=>b.uid!==uid); const ex=R.placed.find(p=>p.uid===uid);
+    if(ex) Object.assign(ex,{gx,gy,rot}); else R.placed.push({uid,id,gx,gy,rot}); this._syncRoomMirror(); this.save(); this.emit('decor'); return true; }
+  storeItem(uid){ const D=this.s.decor, R=this.curRoom(); const p=R.placed.find(x=>x.uid===uid); if(!p) return; R.placed=R.placed.filter(x=>x!==p); D.boxes.push({uid,id:p.id}); this._syncRoomMirror(); this.save(); this.emit('decor'); }
+  paint(kind,color){ const R=this.curRoom(); if(R[kind]===color) return true; if(!this.spend(DATA.PAINT_COST)) return false; R[kind]=color; this._syncRoomMirror(); this.save(); this.emit('decor'); return true; }
+  comfort(){ const D=this.s.decor; let total=0;
+    for(const [rid,r] of Object.entries(D.rooms||{})){
+      total+=(r.placed||[]).reduce((a,p)=>a+((DATA.DECOR[p.id]&&DATA.DECOR[p.id].comfort)||5),0);
+      if(DATA.ROOMS[rid]&&r.wall!==DATA.ROOMS[rid].wall) total+=3;
+    }
+    const hc=DATA.HOUSES[D.house]; if(hc) total+=hc.comfort||0;
+    return total; }
+  incomeRate(){ return Math.max(1,Math.round(this.comfort()/5)); }
   income(){ const h=Math.min(8,(Date.now()-this.s.decor.lastCollect)/3600e3); return Math.floor(h*this.incomeRate()); }
   collect(){ const g=this.income(); if(g<=0) return 0; this.s.decor.lastCollect=Date.now(); this.addGems(g,'Thu nhập phòng'); return g; }
 
-  /* --- social --- */
-  sendChat(fid,m){ const c=(this.s.chats[fid]=this.s.chats[fid]||[]); c.push({me:true,...m}); this.save(); this.emit('chat',fid);
-    const f=DATA.FRIENDS.find(x=>x.id===fid);
-    setTimeout(()=>{ c.push({me:false,text:U.pick(DATA.REPLIES).replace('{m}',f.screen)}); this.save(); this.emit('chat',fid); },1100+Math.random()*900); }
-  board(tab){ const s=this.s;
-    const me={id:'me',me:true,name:s.name,gems:s.gems,screen:s.screen.used,quests:s.questsTotal};
-    const all=[...DATA.FRIENDS.map(f=>({...f})),me];
-    return all.sort((a,b)=>tab==='screen'?a.screen-b.screen:b[tab]-a[tab]); }
-
-  /* --- minigames --- */
   finishShopping(sum){ const s=this.s; s.shop.history.push({month:s.shop.month,profile:sum.profile,spent:sum.spent,fomo:sum.fomoCount,gem:sum.gem}); s.shop.month++;
     this.boost(0,sum.reserveOk?8:-4); this.addGems(sum.gem,'Shopping Tỉnh Thức'); this.emit('change'); }
   finishMonster(score,gem){ const m=this.s.monster; m.plays++; m.best=Math.max(m.best,score); this.boost(0,gem>20?6:0); this.addGems(gem,'Quái vật FOMO'); this.emit('change'); }
 
-  /* --- demo controls --- */
-  demoScreenOut(){ const sc=this.s.screen; sc.used=sc.limit+sc.extra; sc.floor=sc.used; sc.locked=false; this.tick(); }
+  /* Demo / test helpers */
+  demoScreenOut(){
+    const s=this.s, mode=s.block.mode||'apps';
+    if(mode==='lockdown'){
+      const sc=s.screen; sc.used=sc.limit+sc.extra; sc.totalUsed=sc.used; sc.floor=sc.used; sc.locked=false; this.tick();
+    } else if(mode==='apps'){
+      const list=this.activeAppEntries();
+      const target=list[0]||{key:'tiktok.com',name:'TikTok',limit:30};
+      s.screen.allSites[target.key]=target.limit; s.screen.sites[target.key]=target.limit;
+      this.save(); this.syncPolicy(); this.emit('change');
+      if(typeof Overlays!=='undefined') Overlays.screen(true,{site:target.name,mode:'apps',limit:target.limit});
+    } else {
+      const g=(s.block.groups||[])[0]||{id:'social',name:'Mạng xã hội',limit:45,web:['tiktok'],custom:[]};
+      const doms=this.domainsOfWebIds(g.web,g.custom);
+      const k=Bridge.nativeApps?((Bridge.electron?(g.pc||[]):(g.android||[]))[0]?.name||'App nhóm'):(doms[0]||'tiktok.com');
+      s.screen.allSites[k]=g.limit+(s.screen.extra||0); s.screen.sites[k]=g.limit+(s.screen.extra||0);
+      this.save(); this.syncPolicy(); this.emit('change');
+      if(typeof Overlays!=='undefined') Overlays.screen(true,{site:`Nhóm "${g.name}"`,mode:'groups',limit:g.limit+(s.screen.extra||0)});
+    }
+  }
   demoBedtime(){ const [y,m,d]=this.s.day.split('-').map(Number), b=this.bedH(); const plus=b<this.wakeH()?1:0;
-    this.s.offset=new Date(y,m-1,d+plus,Math.floor(b),Math.round((b%1)*60),0)-Date.now(); this.s.night={key:this.s.day,slept:false,broken:false}; this.bedLockOn=false; this.syncPolicy(); this.tick(); }
+    const target=new Date(y,m-1,d+plus,Math.floor(b),Math.round((b%1)*60),0);
+    this.s.offset=(target.getTime()-this.now().getTime())+(this.s.offset||0);
+    this.s.night={key:this.s.day,slept:false,broken:false}; this.bedLockOn=false; this.syncPolicy(); this.tick(); }
   demoMorning(q){ const s=this.s, [y,m,d]=s.day.split('-').map(Number), w=this.wakeH();
-    s.night={key:s.day,slept:q==='good',broken:q==='bad'}; s.offset=new Date(y,m-1,d+1,Math.floor(w),Math.round((w%1)*60)+2,0)-Date.now(); this.newDay(q); }
+    s.night={key:s.day,slept:q==='good',broken:q==='bad'};
+    const target=new Date(y,m-1,d+1,Math.floor(w),Math.round((w%1)*60)+2,0);
+    s.offset=(target.getTime()-this.now().getTime())+(s.offset||0);
+    this.newDay(q); }
   demoWindows(){ this.s.force={until:Date.now()+10*60e3,id:'demo'+Date.now()}; this.save(); this.emit('change'); }
   demoIncome(){ this.s.decor.lastCollect=Date.now()-8*3600e3; this.save(); this.emit('decor'); }
   realTime(){ this.s.offset=0; this.s.force.until=0; this.bedLockOn=false; this.save(); this.syncPolicy(); this.tick(); this.emit('change'); }
 }
 
-/* ---------- Grid A* pathfinding (8 hướng, không cắt góc) + làm mượt LOS ---------- */
 const Path = {
   make(cols,rows,cell,blockedFn){ const g=new Uint8Array(cols*rows);
     for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) g[y*cols+x]=blockedFn((x+.5)*cell,(y+.5)*cell,x,y)?1:0;
@@ -368,7 +847,6 @@ const Path = {
     return out; }
 };
 
-/* ---------- Mover: di chuyển theo waypoint, xoay mặt mượt ---------- */
 class Mover {
   constructor(x,y,speed){ Object.assign(this,{x,y,speed,path:[],yaw:0,tyaw:0,moving:false,onArrive:null}); }
   go(path,cb){ this.path=path.slice(); this.onArrive=cb||null; if(!this.path.length && cb){ this.onArrive=null; cb(); } }

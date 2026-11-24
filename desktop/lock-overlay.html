@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self'">
+<title>Lừa Chill — Đã chạm giới hạn</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;font-family:"Nunito","Segoe UI",system-ui,sans-serif;background:rgba(10,51,35,.96);color:#0A3323;user-select:none;overflow:hidden}
+  body{display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:min(460px,94vw);background:#F7F4D5;border:3.5px solid #0A3323;border-radius:26px;padding:30px 26px 24px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.45),0 6px 0 #0A3323}
+  .badge{display:inline-block;background:#105666;color:#F7F4D5;font-weight:800;font-size:12px;letter-spacing:.5px;padding:6px 14px;border-radius:999px;border:2px solid #0A3323}
+  .ico{margin:16px auto 10px;width:78px;height:78px;display:flex;align-items:center;justify-content:center;background:#839958;border:3px solid #0A3323;border-radius:22px;box-shadow:0 4px 0 #0A3323}
+  h1{font-size:24px;line-height:1.25;margin-top:8px;color:#0A3323;font-weight:900}
+  p{margin:10px 0 22px;font-size:15px;line-height:1.5;color:#105666;font-weight:700}
+  .btn{display:block;width:100%;padding:14px 18px;border:2.5px solid #0A3323;border-radius:16px;font:900 16px/1.2 inherit;color:#0A3323;cursor:pointer;box-shadow:0 4px 0 #0A3323;transition:transform .08s}
+  .btn:active{transform:translateY(3px);box-shadow:0 1px 0 #0A3323}
+  .btn.moss{background:#839958;margin-bottom:12px}
+  .btn.rose{background:#D3968C}
+  .foot{margin-top:14px;font-size:12.5px;color:#105666;opacity:.85;font-weight:700}
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">LỪA CHILL • ĐÃ CHẠM GIỚI HẠN</span>
+    <div class="ico" aria-hidden="true">
+      <svg width="56" height="56" viewBox="0 0 108 108">
+        <path fill="#B8B0A6" stroke="#0A3323" stroke-width="3.2" d="M34,42 L28,18 L44,34 Z M74,42 L80,18 L64,34 Z"/>
+        <rect x="22" y="34" width="64" height="46" rx="12" fill="#B8B0A6" stroke="#0A3323" stroke-width="3.2"/>
+        <rect x="27" y="58" width="54" height="30" rx="10" fill="#F7F4D5" stroke="#0A3323" stroke-width="3.2"/>
+        <circle cx="42" cy="49" r="4" fill="#0A3323"/>
+        <circle cx="66" cy="49" r="4" fill="#0A3323"/>
+        <path d="M44,72 Q54,78 64,72" fill="none" stroke="#0A3323" stroke-width="3.2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1 id="lkTitle">Đã chạm giới hạn màn hình!</h1>
+    <p id="lkDetail">Hãy tạm dừng ứng dụng giải trí để cho đôi mắt nghỉ ngơi một chút nhé.</p>
+    <button class="btn moss" id="btnReturn">Quay về app Lừa Chill</button>
+    <button class="btn rose" id="btnHome">Tắt ứng dụng này &amp; Về màn hình chính</button>
+    <div class="foot">Chọn một trong 2 cách trên để tiếp tục — Lừa Chill đang giữ nhịp sống lành mạnh cho bạn.</div>
+  </div>
+  <script src="lock-overlay.js"></script>
+</body>
+</html>
