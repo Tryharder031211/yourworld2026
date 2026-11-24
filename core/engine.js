@@ -71,13 +71,39 @@ const ClockUtil = {
 };
 
 const DATA = {
+  QUEST_CATS:{body:'Thể chất',outdoor:'Ngoài trời',mind:'Tinh thần',social:'Kết nối',care:'Chăm sóc'},
+  DAILY_QUEST_COUNT:6,
+  DAILY_REROLLS:2,
   QUESTS:[
-    {id:'water',   name:'Uống 1 ly nước',            icon:'glass', gem:20},
-    {id:'exercise',name:'Tập thể dục 10 phút',       icon:'run',   gem:25},
-    {id:'grass',   name:'Ra ngoài chạm vào cỏ',      icon:'grass', gem:25},
-    {id:'read',    name:'Đọc 10 trang sách',         icon:'book',  gem:20},
-    {id:'feed',    name:'Cho thú cưng ăn đúng giờ',  icon:'bowl',  gem:15},
-    {id:'plant',   name:'Tưới cây đúng giờ',         icon:'can',   gem:15}
+    /* Thể chất */
+    {id:'water',     cat:'body',    name:'Uống đủ 2 ly nước lọc',                   icon:'glass',      gem:20},
+    {id:'exercise',  cat:'body',    name:'Tập thể dục / giãn cơ 10 phút',           icon:'run',        gem:25},
+    {id:'walk',      cat:'body',    name:'Đi bộ 15 phút không nhìn điện thoại',     icon:'shoes',      gem:25},
+    {id:'eyes',      cat:'body',    name:'Nghỉ mắt 20-20-20 nhìn xa ra ngoài trời', icon:'sun',        gem:20},
+    {id:'posture',   cat:'body',    name:'Giãn cổ vai gáy & chỉnh tư thế ngồi',     icon:'bolt',       gem:20},
+    {id:'fruit',     cat:'body',    name:'Ăn 1 phần trái cây hoặc rau xanh',        icon:'flower',     gem:20},
+    /* Ngoài trời & Đời thực */
+    {id:'grass',     cat:'outdoor', name:'Ra ngoài chạm vào cỏ / cây xanh',         icon:'grass',      gem:25},
+    {id:'sunlight',  cat:'outdoor', name:'Phơi nắng sáng / hít thở ngoài trời 5p',  icon:'sunrise',    gem:20},
+    {id:'sky',       cat:'outdoor', name:'Chụp 1 tấm ảnh bầu trời hoặc cây quanh bạn',icon:'camera',   gem:20},
+    {id:'tidy',      cat:'outdoor', name:'Dọn gọn bàn học / góc làm việc',          icon:'broom',      gem:25},
+    {id:'cook',      cat:'outdoor', name:'Tự pha đồ uống lành mạnh hoặc làm bữa nhẹ',icon:'cooker',    gem:25},
+    {id:'plant_real',cat:'outdoor', name:'Tưới hoặc lau lá cho 1 chậu cây thật',    icon:'sprout',     gem:20},
+    /* Tinh thần & Cai màn hình */
+    {id:'read',      cat:'mind',    name:'Đọc 10 trang sách giấy',                  icon:'book',       gem:20},
+    {id:'journal',   cat:'mind',    name:'Viết 3 điều khiến bạn biết ơn hôm nay',   icon:'quest',      gem:20},
+    {id:'breathe',   cat:'mind',    name:'Hít thở sâu / thiền tĩnh tâm 5 phút',     icon:'moon',       gem:20},
+    {id:'detox30',   cat:'mind',    name:'Đặt điện thoại sang phòng khác 30 phút',  icon:'phone',      gem:30},
+    {id:'music',     cat:'mind',    name:'Nghe 1 bản nhạc thư giãn không lướt mạng',icon:'headphones', gem:20},
+    {id:'learn',     cat:'mind',    name:'Học 1 kiến thức mới ngoài mạng xã hội',   icon:'desklamp',   gem:25},
+    /* Kết nối */
+    {id:'talk',      cat:'social',  name:'Trò chuyện trực tiếp với gia đình / bạn 10p',icon:'heart',   gem:25},
+    {id:'smile',     cat:'social',  name:'Gửi 1 lời hỏi thăm tích cực cho người thân',icon:'chat',     gem:20},
+    {id:'declutter', cat:'social',  name:'Tắt bớt thông báo từ 1 app gây xao nhãng',icon:'bell',       gem:20},
+    {id:'plan',      cat:'social',  name:'Viết ra 3 việc quan trọng nhất hôm nay',  icon:'calendar',   gem:20},
+    /* Chăm sóc trong game (tự hoàn thành khi tưới/cho ăn đúng giờ) */
+    {id:'feed',      cat:'care',    name:'Cho thú cưng ăn đúng giờ',                icon:'bowl',       gem:15},
+    {id:'plant',     cat:'care',    name:'Tưới cây trong vườn đúng giờ',            icon:'can',        gem:15}
   ],
   GARDEN_WIN:[{id:'am',label:'Sáng',from:6,to:10},{id:'pm',label:'Chiều',from:16,to:19}],
   MEAL_WIN:[{id:'b',label:'Bữa sáng',from:6,to:10},{id:'l',label:'Bữa trưa',from:11,to:14},{id:'d',label:'Bữa tối',from:18,to:21}],
@@ -252,6 +278,40 @@ function defaultBlock(){
 function defaultReminders(){
   return {enabled:true,quests:true,questTime:'10:00',questTime2:'17:00',checkin:true,bed:true,bedLead:15,wake:true,limitWarn:true,limitLead:10,fired:{}};
 }
+function rollDailyQuests(prevIds=[], keepIds=[]){
+  const valid=new Set(DATA.QUESTS.map(q=>q.id));
+  const used=new Set((keepIds||[]).filter(id=>valid.has(id)));
+  const avoid=new Set(prevIds||[]);
+  const pickFrom=pool=>{
+    const avail=pool.filter(q=>!used.has(q.id));
+    if(!avail.length) return null;
+    const fresh=avail.filter(q=>!avoid.has(q.id));
+    const chosen=U.pick(fresh.length?fresh:avail);
+    used.add(chosen.id);
+    return chosen.id;
+  };
+  const out=[...used];
+  /* Bảo đảm mỗi ngày đủ 4 nhóm đời thực cân bằng + 1 quest đời thực ngẫu nhiên + 1 quest chăm sóc game */
+  for(const cat of ['body','outdoor','mind','social']){
+    if(out.length>=DATA.DAILY_QUEST_COUNT) break;
+    if(!out.some(id=>(DATA.QUESTS.find(q=>q.id===id)||{}).cat===cat)){
+      const id=pickFrom(DATA.QUESTS.filter(q=>q.cat===cat));
+      if(id) out.push(id);
+    }
+  }
+  if(out.length<DATA.DAILY_QUEST_COUNT && !out.some(id=>(DATA.QUESTS.find(q=>q.id===id)||{}).cat==='care')){
+    const id=pickFrom(DATA.QUESTS.filter(q=>q.cat==='care'));
+    if(id) out.push(id);
+  }
+  while(out.length<DATA.DAILY_QUEST_COUNT){
+    const id=pickFrom(DATA.QUESTS.filter(q=>q.cat!=='care'))||pickFrom(DATA.QUESTS);
+    if(!id) break;
+    out.push(id);
+  }
+  /* Xáo trộn thứ tự (Fisher-Yates) để bảng Quest mỗi ngày mới mẻ */
+  for(let i=out.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [out[i],out[j]]=[out[j],out[i]]; }
+  return out.slice(0,DATA.DAILY_QUEST_COUNT);
+}
 
 class GameCore {
   constructor(){ this.ls={}; this.state=Store.load(); this.bedLockOn=false; this._n=0; this.visible=true; this._lastRealMs=Date.now(); if(this.state) this.migrate(); }
@@ -273,6 +333,16 @@ class GameCore {
     s.block.appLimits=s.block.appLimits||{}; s.block.emergency=s.block.emergency||[]; s.block.emergencyPc=s.block.emergencyPc||[]; s.block.emergencyWeb=s.block.emergencyWeb||['zalo.me'];
     s.reminders={...defaultReminders(),...(s.reminders||{})}; s.reminders.fired=s.reminders.fired||{};
     s.care=s.care||{streak:0,last:null,combo:{}};
+    /* Di chuyển / đảm bảo danh sách 6 Quest ngẫu nhiên mỗi ngày */
+    s.quests=s.quests||{day:s.day,done:{}};
+    s.quests.done=s.quests.done||{};
+    s.quests.prev=Array.isArray(s.quests.prev)?s.quests.prev:[];
+    s.quests.rerolls=Number(s.quests.rerolls)||0;
+    const validQ=new Set(DATA.QUESTS.map(q=>q.id));
+    if(!Array.isArray(s.quests.list) || s.quests.list.length!==DATA.DAILY_QUEST_COUNT || !s.quests.list.every(id=>validQ.has(id))){
+      const keep=Object.keys(s.quests.done).filter(id=>validQ.has(id));
+      s.quests.list=rollDailyQuests(s.quests.prev, keep);
+    }
     /* Di chuyển save phòng cũ sang hệ thống nhiều phòng + ngoại thất nhà + theme miễn phí */
     s.decor=s.decor||{wall:'#F7F4D5',floor:'#c99a6b',placed:[],boxes:[],lastCollect:Date.now()};
     if(!s.decor.rooms){
@@ -303,7 +373,7 @@ class GameCore {
       night:{key:null,slept:false,broken:false},
       sleep:{last:null,lastDay:null,streak:0,buffDay:null,bed:'23:00',wake:'07:00',hist:[]},
       checkin:{last:null,streak:0,hist:[]},
-      quests:{day,done:{}}, questsTotal:0,
+      quests:{day,list:rollDailyQuests([],[]),done:{},prev:[],rerolls:0}, questsTotal:0,
       garden:{health:72,xp:30,watered:{},missed:{}},
       pets:{owned:['dog'],fed:{},happy:70,xp:{dog:0}},
       decor:{wall:'#F7F4D5',floor:'#c99a6b',lastCollect:Date.now(),activeRoom:'bedroom',house:'mushroom',housesOwned:['mushroom'],
@@ -598,9 +668,10 @@ class GameCore {
     if(r.checkin && this.canCheckIn() && this.hoursSinceWake()>=0.15){
       fire('checkin','Nhớ điểm danh buổi sáng 📅',`Cửa sổ điểm danh 8 tiếng đang mở — vào nhận Gem ngay!`,'sleep');
     }
-    if(r.quests && this.questCount()<DATA.QUESTS.length){
-      if(hmNow===r.questTime) fire('quest1','Nhắc nhiệm vụ đời thực ✅',`Còn ${DATA.QUESTS.length-this.questCount()} Quest hôm nay (uống nước, chạm cỏ, đọc sách...).`,'tasks');
-      if(r.questTime2 && hmNow===r.questTime2) fire('quest2','Nhắc nhiệm vụ buổi chiều 🌿',`Hoàn thành nốt ${DATA.QUESTS.length-this.questCount()} Quest để nhận thêm Gem nhé!`,'tasks');
+    const qTot=this.todayQuests().length;
+    if(r.quests && this.questCount()<qTot){
+      if(hmNow===r.questTime) fire('quest1','Nhắc nhiệm vụ đời thực ✅',`Còn ${qTot-this.questCount()} Quest ngẫu nhiên hôm nay đang chờ bạn!`,'tasks');
+      if(r.questTime2 && hmNow===r.questTime2) fire('quest2','Nhắc nhiệm vụ buổi chiều 🌿',`Hoàn thành nốt ${qTot-this.questCount()} Quest hôm nay để nhận thêm Gem nhé!`,'tasks');
     }
     if(r.limitWarn){
       const mode=s.block.mode||'apps', extra=s.screen.extra||0;
@@ -712,8 +783,9 @@ class GameCore {
   }
   newDay(){ const s=this.s; const prev=s.day, nextDay=this.dk(this.now());
     const consecutive=(nextDay===U.addDays(prev,1));
+    const prevQList=Array.isArray(s.quests&&s.quests.list)?s.quests.list.slice():[];
     s.day=nextDay;
-    s.quests={day:s.day,done:{}};
+    s.quests={day:s.day,list:rollDailyQuests(prevQList,[]),done:{},prev:prevQList,rerolls:0};
     Object.assign(s.screen,{used:0,totalUsed:0,extra:0,acc:0,webSec:0,locked:false,floor:0,sites:{},allSites:{},perPkg:{}});
     const wasBroken=(s.night.key===prev && s.night.broken);
     s.night={key:null,slept:false,broken:false}; this.bedLockOn=false;
@@ -756,9 +828,37 @@ class GameCore {
   goSleep(){ this.s.night.slept=true; this.save(); this.syncPolicy(); this.emit('sleepState'); this.emit('change'); }
   breakBedLock(){ this.s.night.broken=true; this.s.night.slept=false; this.bedLockOn=false; this.save(); this.syncPolicy(); this.emit('bedLock',false); this.emit('change'); }
 
-  questGem(id){ const q=DATA.QUESTS.find(x=>x.id===id); return Math.round(q.gem*(this.hasBuff()?1.2:1)); }
-  questCount(){ return Object.keys(this.s.quests.done).length; }
+  todayQuestIds(){
+    const s=this.s; if(!s) return [];
+    const valid=new Set(DATA.QUESTS.map(q=>q.id));
+    if(!s.quests||!Array.isArray(s.quests.list)||s.quests.list.length!==DATA.DAILY_QUEST_COUNT||!s.quests.list.every(id=>valid.has(id))){
+      s.quests=s.quests||{day:s.day,done:{},prev:[],rerolls:0};
+      s.quests.list=rollDailyQuests(s.quests.prev||[], Object.keys(s.quests.done||{}));
+      this.save();
+    }
+    return s.quests.list;
+  }
+  todayQuests(){ return this.todayQuestIds().map(id=>DATA.QUESTS.find(q=>q.id===id)).filter(Boolean); }
+  questRerollsLeft(){ return Math.max(0, DATA.DAILY_REROLLS - ((this.s&&this.s.quests&&this.s.quests.rerolls)||0)); }
+  rerollQuest(id){
+    const s=this.s, ids=this.todayQuestIds(), idx=ids.indexOf(id);
+    if(idx<0) return {ok:false,msg:'Quest không nằm trong danh sách hôm nay'};
+    if(s.quests.done[id]) return {ok:false,msg:'Quest đã hoàn thành rồi'};
+    if(this.questRerollsLeft()<=0) return {ok:false,msg:`Bạn đã dùng hết ${DATA.DAILY_REROLLS} lượt đổi Quest hôm nay — mai sẽ tự động đổi mới!`};
+    const cur=DATA.QUESTS.find(q=>q.id===id), used=new Set(ids), avoid=new Set(s.quests.prev||[]);
+    const pool=DATA.QUESTS.filter(q=>!used.has(q.id) && (cur&&cur.cat==='care'?true:q.cat!=='care'));
+    const fresh=pool.filter(q=>!avoid.has(q.id));
+    const next=U.pick(fresh.length?fresh:pool);
+    if(!next) return {ok:false,msg:'Không còn Quest nào khác để đổi'};
+    s.quests.list[idx]=next.id;
+    s.quests.rerolls=(s.quests.rerolls||0)+1;
+    this.save(); this.emit('quest',{rerolled:id,next:next.id}); this.emit('change');
+    return {ok:true,next,left:this.questRerollsLeft()};
+  }
+  questGem(id){ const q=DATA.QUESTS.find(x=>x.id===id); return Math.round(((q&&q.gem)||20)*(this.hasBuff()?1.2:1)); }
+  questCount(){ const ids=new Set(this.todayQuestIds()); return Object.keys((this.s&&this.s.quests&&this.s.quests.done)||{}).filter(id=>ids.has(id)).length; }
   completeQuest(id,photo,auto){ const s=this.s, d=s.quests.done;
+    if(!this.todayQuestIds().includes(id)) return {ok:false};
     if(d[id]){ if(photo && !d[id].photo){ d[id].photo=photo; this.save(); this.emit('quest',{id}); } return {ok:false}; }
     d[id]={photo:photo||null,auto:!!auto,t:Date.now()};
     const g=this.questGem(id); s.questsTotal++; this.boost(6,6); this.addGems(g,'Quest');

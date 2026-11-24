@@ -1,6 +1,6 @@
 /* sw.js — Service Worker PWA (bộ đệm app-shell, luôn dùng mạng cho API Supabase) */
 'use strict';
-const CACHE = 'luachill-v3';
+const CACHE = 'luachill-v4';
 const SHELL = [
   './', './index.html', './config.js', './pwa.webmanifest',
   './assets/style.css', './assets/doodle-icons.js', './assets/voxel-donkey.js', './assets/scenes.js',

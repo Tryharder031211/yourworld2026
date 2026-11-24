@@ -182,7 +182,7 @@ const HUD={
     const b=$('hudBuff'); if(Core.hasBuff()){ b.className='tag moss'; b.innerHTML=`${sv(IP.bolt,11)} +20% Gem`; } else if(Core.isTiredToday()){ b.className='tag rose'; b.textContent='Thiếu ngủ'; } else b.className='tag hide';
     $('hudCheck').classList.toggle('hide',!Core.canCheckIn()||Core.isBedtime());
     const dot=$('cloudDot'); if(dot) dot.classList.toggle('hide',!Cloud.online);
-    const left=DATA.QUESTS.length-Core.questCount(); const qb=$('qBadge'); qb.textContent=left; qb.style.display=left?'':'none';
+    const left=Core.todayQuests().length-Core.questCount(); const qb=$('qBadge'); qb.textContent=left; qb.style.display=left?'':'none';
     const fb=$('fBadge'); const pn=(typeof Cloud!=='undefined'&&Cloud.online)?Cloud.incomingIds.length:0;
     if(fb){ fb.textContent=pn; fb.style.display=pn?'':'none'; }
     const rd=$('reqDot'); if(rd){ rd.textContent=pn>9?'9+':pn; rd.classList.toggle('hide',!pn); }
