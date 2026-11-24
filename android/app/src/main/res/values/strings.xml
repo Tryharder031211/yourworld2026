@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lừa Chill</string>
+    <string name="blocker_service_label">Lừa Chill — Chặn ứng dụng</string>
+    <string name="blocker_service_desc">Tự động chặn các ứng dụng giải trí bạn đã chọn khi hết thời gian màn hình hoặc đang trong 8 tiếng giờ ngủ. Chỉ đọc tên ứng dụng đang mở, không đọc nội dung màn hình.</string>
+</resources>
