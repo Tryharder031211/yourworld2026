@@ -1,0 +1,16 @@
+{
+  "name": "Lừa Chill — Healthy Habits in a Digital World",
+  "short_name": "Lừa Chill",
+  "description": "Ứng dụng cozy giúp giảm thời gian màn hình, ngủ đủ 8 tiếng, chống FOMO và kết nối cộng đồng sống khỏe (UN SDG 3).",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0A3323",
+  "theme_color": "#0A3323",
+  "icons": [
+    { "src": "assets/icons/icon48.png", "sizes": "48x48", "type": "image/png" },
+    { "src": "assets/icons/icon128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "assets/img/logo-donkey.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

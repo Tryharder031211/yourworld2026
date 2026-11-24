@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Lừa Chill — Healthy Habits in a Digital World",
+  "short_name": "Lừa Chill",
+  "version": "2.0.0",
+  "description": "Ứng dụng giúp giảm thời gian màn hình, ngủ đủ 8 tiếng, điểm danh nhận thưởng, chống FOMO và kết nối cộng đồng (UN SDG 3). Tự chặn các trang web bạn chọn khi hết giờ hoặc đến giờ ngủ.",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Mở Lừa Chill",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "alarms", "declarativeNetRequest", "idle", "notifications", "identity"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["module-suc-khoe/*", "module-tycoon-tamly/*", "assets/*", "core/*", "config.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
